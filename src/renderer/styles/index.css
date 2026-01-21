@@ -1,0 +1,167 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Custom base styles */
+@layer base {
+  html {
+    font-family: 'Inter', system-ui, sans-serif;
+  }
+  
+  body {
+    @apply bg-slate-900 text-slate-100 antialiased;
+    overflow: hidden;
+  }
+  
+  /* Custom scrollbar */
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  
+  ::-webkit-scrollbar-track {
+    @apply bg-slate-800 rounded-full;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    @apply bg-slate-600 rounded-full hover:bg-slate-500;
+  }
+}
+
+/* Component styles */
+@layer components {
+  /* Glass effect for cards */
+  .glass {
+    @apply bg-slate-800/50 backdrop-blur-md border border-slate-700/50 rounded-2xl;
+  }
+  
+  .glass-light {
+    @apply bg-white/10 backdrop-blur-md border border-white/20 rounded-2xl;
+  }
+  
+  /* Primary button */
+  .btn-primary {
+    @apply px-6 py-3 bg-gradient-to-r from-opal-500 to-opal-600 
+           text-white font-semibold rounded-xl
+           hover:from-opal-400 hover:to-opal-500
+           active:from-opal-600 active:to-opal-700
+           transition-all duration-200 ease-out
+           shadow-lg shadow-opal-500/25 hover:shadow-opal-500/40
+           focus:outline-none focus:ring-2 focus:ring-opal-400 focus:ring-offset-2 focus:ring-offset-slate-900;
+  }
+  
+  /* Secondary button */
+  .btn-secondary {
+    @apply px-6 py-3 bg-slate-700/50 
+           text-slate-200 font-medium rounded-xl
+           hover:bg-slate-600/50 hover:text-white
+           active:bg-slate-700
+           transition-all duration-200
+           border border-slate-600/50
+           focus:outline-none focus:ring-2 focus:ring-slate-400;
+  }
+  
+  /* Icon button */
+  .btn-icon {
+    @apply p-2 rounded-lg bg-slate-700/50 text-slate-300
+           hover:bg-slate-600/50 hover:text-white
+           active:bg-slate-700
+           transition-all duration-150;
+  }
+  
+  /* Mode tabs */
+  .mode-tab {
+    @apply px-6 py-3 font-medium text-sm rounded-xl
+           text-slate-400 hover:text-slate-200 hover:bg-slate-700/30
+           transition-all duration-200;
+  }
+  
+  .mode-tab-active {
+    @apply bg-gradient-to-r from-opal-500/20 to-opal-600/20 
+           text-opal-300 border border-opal-500/30
+           shadow-lg shadow-opal-500/10;
+  }
+  
+  /* Input field */
+  .input-field {
+    @apply w-full px-4 py-3 bg-slate-800/50 border border-slate-600/50 rounded-xl
+           text-slate-100 placeholder-slate-500
+           focus:outline-none focus:border-opal-500 focus:ring-2 focus:ring-opal-500/20
+           transition-all duration-200;
+  }
+  
+  /* Solution step styling */
+  .solution-step {
+    @apply p-4 rounded-xl bg-slate-800/30 border-l-4 mb-3
+           animate-fade-in;
+  }
+  
+  .solution-step-given {
+    @apply border-l-given bg-given/5;
+  }
+  
+  .solution-step-formula {
+    @apply border-l-formula bg-formula/5;
+  }
+  
+  .solution-step-work {
+    @apply border-l-slate-500 bg-slate-500/5;
+  }
+  
+  .solution-step-answer {
+    @apply border-l-answer bg-answer/5;
+  }
+  
+  .solution-step-note {
+    @apply border-l-note bg-note/5;
+  }
+}
+
+/* Utility styles */
+@layer utilities {
+  /* Drag region for frameless window */
+  .drag-region {
+    -webkit-app-region: drag;
+  }
+  
+  .no-drag {
+    -webkit-app-region: no-drag;
+  }
+  
+  /* Text gradient */
+  .text-gradient {
+    @apply bg-gradient-to-r from-opal-400 to-opal-600 bg-clip-text text-transparent;
+  }
+  
+  /* Animated background */
+  .bg-animated {
+    background: linear-gradient(
+      135deg,
+      theme('colors.slate.900') 0%,
+      theme('colors.slate.800') 50%,
+      theme('colors.opal.900/0.3') 100%
+    );
+    background-size: 200% 200%;
+    animation: gradientMove 15s ease infinite;
+  }
+  
+  @keyframes gradientMove {
+    0% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 50%; }
+  }
+}
+
+/* KaTeX overrides for dark mode */
+.katex {
+  color: inherit;
+  font-size: 1.1em;
+}
+
+.katex .mord,
+.katex .mbin,
+.katex .mrel,
+.katex .mop,
+.katex .mpunct {
+  color: inherit;
+}
