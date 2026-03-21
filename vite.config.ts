@@ -9,6 +9,15 @@ export default defineConfig({
     build: {
         outDir: '../../dist/renderer',
         emptyOutDir: true,
+        rollupOptions: {
+            output: {
+                manualChunks(id) {
+                    if (id.includes('node_modules/tesseract.js')) return 'tesseract';
+                    if (id.includes('node_modules/katex')) return 'katex';
+                    return undefined;
+                },
+            },
+        },
     },
     resolve: {
         alias: {

@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { Problem } from '../App';
 import { solveWithAI } from '../../services/AIService';
+import { textToSpeech, voicePlayer } from '../../services/VoiceService';
 import DrawingCanvas from './DrawingCanvas';
 import MathRenderer from './MathRenderer';
 
@@ -17,6 +18,23 @@ interface LearningStep {
     narration: string;
     action: string;
     visual?: string;
+}
+
+function parseLearningSteps(response: string): LearningStep[] {
+    const stepPattern = /Step \d+:([\s\S]*?)(?=Step \d+:|$)/gi;
+    const matches = [...response.matchAll(stepPattern)];
+
+    if (matches.length === 0) {
+        return response.split('\n\n').filter(p => p.trim()).map(p => ({
+            narration: p,
+            action: p,
+        }));
+    }
+
+    return matches.map(match => ({
+        narration: match[1].trim(),
+        action: match[1].trim(),
+    }));
 }
 
 const LearningMode: React.FC<LearningModeProps> = ({ problem, onBack }) => {
@@ -33,22 +51,49 @@ const LearningMode: React.FC<LearningModeProps> = ({ problem, onBack }) => {
 
     const canvasRef = useRef<{ clear: () => void; addText: (text: string, x: number, y: number) => void } | null>(null);
 
-    // Load learning content
     useEffect(() => {
-        const loadContent = async () => {
-            if (problem && steps.length === 0) {
-                setIsLoading(true);
-                try {
-                    const response = await solveWithAI(problem, 'learning');
+        if (!problem) return;
 
-                    // Parse response into learning steps
-                    const parsedSteps = parseLearningSteps(response.rawResponse);
+        setSteps([]);
+        setCurrentStepIndex(0);
+        setCurrentTime(0);
+        setIsPlaying(false);
+
+        let cancelled = false;
+
+        (async () => {
+            setIsLoading(true);
+            try {
+                const response = await solveWithAI(problem, 'learning');
+
+                const rawSteps = response.steps as unknown[];
+                const isLearningShape = (s: unknown): s is LearningStep => {
+                    if (!s || typeof s !== 'object') return false;
+                    const o = s as Record<string, unknown>;
+                    return typeof o.narration === 'string' || typeof o.action === 'string';
+                };
+
+                let parsedSteps: LearningStep[];
+                if (rawSteps.length > 0 && isLearningShape(rawSteps[0])) {
+                    parsedSteps = rawSteps.map((s) => {
+                        const o = s as LearningStep;
+                        return {
+                            narration: o.narration || '',
+                            action: o.action || o.narration || '',
+                            visual: o.visual,
+                        };
+                    });
+                } else {
+                    parsedSteps = parseLearningSteps(response.rawResponse);
+                }
+                if (!cancelled) {
                     setSteps(parsedSteps);
-                    setTotalTime(parsedSteps.length * 10); // Estimate 10 seconds per step
-                } catch (error) {
-                    console.error('Failed to load learning content:', error);
-                    // Fallback demo content
-                    setSteps([
+                    setTotalTime(parsedSteps.length * 10);
+                }
+            } catch (error) {
+                console.error('Failed to load learning content:', error);
+                if (!cancelled) {
+                    const fallback: LearningStep[] = [
                         {
                             narration: "Let's analyze this problem step by step.",
                             action: "Identifying key information...",
@@ -61,15 +106,50 @@ const LearningMode: React.FC<LearningModeProps> = ({ problem, onBack }) => {
                             narration: "Now we can apply the relevant formula to solve this.",
                             action: "Applying the formula...",
                         },
-                    ]);
-                } finally {
-                    setIsLoading(false);
+                    ];
+                    setSteps(fallback);
+                    setTotalTime(fallback.length * 10);
                 }
+            } finally {
+                if (!cancelled) setIsLoading(false);
             }
-        };
+        })();
 
-        loadContent();
-    }, [problem]);
+        return () => {
+            cancelled = true;
+            voicePlayer.stop();
+        };
+    }, [problem?.id]);
+
+    useEffect(() => {
+        if (isMuted || isLoading || steps.length === 0) {
+            if (isMuted) {
+                voicePlayer.stop();
+            }
+            return;
+        }
+
+        const narration = steps[currentStepIndex]?.narration?.trim();
+        if (!narration) return;
+
+        let cancelled = false;
+        void (async () => {
+            const s = window.electronAPI ? await window.electronAPI.getSettings() : {};
+            if (s.voiceEnabled === false || s.autoNarrateInLearning === false) return;
+            if (cancelled) return;
+            voicePlayer.stop();
+            voicePlayer.setVolume(Number(s.voiceVolume) || 0.7);
+            voicePlayer.setSpeed(playbackSpeed);
+            const buf = await textToSpeech(narration, 'nova', Number(s.voiceSpeed) || 1);
+            if (cancelled || !buf) return;
+            await voicePlayer.play(buf);
+        })();
+
+        return () => {
+            cancelled = true;
+            voicePlayer.stop();
+        };
+    }, [currentStepIndex, steps, isMuted, isLoading, playbackSpeed]);
 
     // Playback control
     useEffect(() => {
@@ -95,25 +175,6 @@ const LearningMode: React.FC<LearningModeProps> = ({ problem, onBack }) => {
 
         return () => clearInterval(timer);
     }, [isPlaying, currentStepIndex, steps.length, playbackSpeed]);
-
-    const parseLearningSteps = (response: string): LearningStep[] => {
-        // Simple parser - in production, this would be more sophisticated
-        const stepPattern = /Step \d+:([\s\S]*?)(?=Step \d+:|$)/gi;
-        const matches = [...response.matchAll(stepPattern)];
-
-        if (matches.length === 0) {
-            // Fallback: split by paragraphs
-            return response.split('\n\n').filter(p => p.trim()).map(p => ({
-                narration: p,
-                action: p,
-            }));
-        }
-
-        return matches.map(match => ({
-            narration: match[1].trim(),
-            action: match[1].trim(),
-        }));
-    };
 
     const goToStep = (index: number) => {
         setCurrentStepIndex(Math.max(0, Math.min(index, steps.length - 1)));

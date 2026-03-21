@@ -1,28 +1,35 @@
 import { app, BrowserWindow, globalShortcut, ipcMain, screen, desktopCapturer } from 'electron';
 import * as path from 'path';
-import Store from 'electron-store';
-
-// Initialize settings store
-const store = new Store({
-    defaults: {
-        overlayOpacity: 0.8,
-        theme: 'dark',
-        voiceEnabled: true,
-        voiceSpeed: 1.0,
-        claudeApiKey: '',
-        openaiApiKey: '',
-        hotkeys: {
-            capture: 'CommandOrControl+Shift+S',
-            toggleOverlay: 'CommandOrControl+Shift+A',
-        },
-    },
-});
+import { store } from './settingsStore';
+import { claudeSolve, claudeContinueGuided, type IpcProblem } from './claudeIpc';
+import { openaiTextToSpeech, openaiTranscribe } from './openaiIpc';
 
 let mainWindow: BrowserWindow | null = null;
 let overlayWindow: BrowserWindow | null = null;
 let captureWindow: BrowserWindow | null = null;
 
-const isDev = process.env.NODE_ENV === 'development' || !app.isPackaged;
+/** When set (e.g. Playwright E2E), load built renderer from disk even if app is not packaged. */
+const useDistBuild = process.env.OPAL_USE_DIST === '1';
+const isDev =
+    (process.env.NODE_ENV === 'development' || !app.isPackaged) && !useDistBuild;
+
+function applyOverlayPinState(): void {
+    if (!overlayWindow) return;
+    const pinned = store.get('overlayPinned') === true;
+    try {
+        if (pinned) {
+            overlayWindow.setAlwaysOnTop(true, 'screen-saver');
+        } else {
+            try {
+                overlayWindow.setAlwaysOnTop(true, 'floating');
+            } catch {
+                overlayWindow.setAlwaysOnTop(true);
+            }
+        }
+    } catch {
+        overlayWindow.setAlwaysOnTop(true);
+    }
+}
 
 function createMainWindow(): void {
     mainWindow = new BrowserWindow({
@@ -78,6 +85,13 @@ function createOverlayWindow(): void {
         overlayWindow.loadFile(path.join(__dirname, '../renderer/index.html'), { hash: '/overlay' });
     }
 
+    const opacity = Number(store.get('overlayOpacity'));
+    if (!Number.isNaN(opacity) && opacity >= 0.2 && opacity <= 1) {
+        overlayWindow.setOpacity(opacity);
+    }
+
+    applyOverlayPinState();
+
     overlayWindow.on('closed', () => {
         overlayWindow = null;
     });
@@ -115,10 +129,23 @@ function createCaptureWindow(): void {
 }
 
 function registerGlobalShortcuts(): void {
+    globalShortcut.unregisterAll();
+
     const captureHotkey = store.get('hotkeys.capture') as string;
     const overlayHotkey = store.get('hotkeys.toggleOverlay') as string;
 
-    globalShortcut.register(captureHotkey, () => {
+    const reg = (accelerator: string, fn: () => void) => {
+        try {
+            if (accelerator && globalShortcut.register(accelerator, fn)) {
+                return;
+            }
+        } catch {
+            /* invalid accelerator */
+        }
+        console.warn('Could not register global shortcut:', accelerator);
+    };
+
+    reg(captureHotkey, () => {
         if (captureWindow) {
             captureWindow.close();
         } else {
@@ -126,7 +153,7 @@ function registerGlobalShortcuts(): void {
         }
     });
 
-    globalShortcut.register(overlayHotkey, () => {
+    reg(overlayHotkey, () => {
         if (overlayWindow) {
             overlayWindow.isVisible() ? overlayWindow.hide() : overlayWindow.show();
         } else {
@@ -135,7 +162,6 @@ function registerGlobalShortcuts(): void {
     });
 }
 
-// IPC Handlers
 ipcMain.handle('get-settings', () => {
     return store.store;
 });
@@ -144,6 +170,42 @@ ipcMain.handle('set-setting', (_event, key: string, value: unknown) => {
     store.set(key, value);
     return true;
 });
+
+ipcMain.handle('reregister-hotkeys', () => {
+    registerGlobalShortcuts();
+    return true;
+});
+
+ipcMain.handle('ai-solve', async (_e, payload: { problem: IpcProblem; mode: 'solution' | 'guided' | 'learning' }) => {
+    return claudeSolve(payload.problem, payload.mode);
+});
+
+ipcMain.handle(
+    'ai-continue-guided',
+    async (
+        _e,
+        payload: {
+            conversationHistory: Array<{ role: string; content: string }>;
+            currentStep: number;
+        }
+    ) => {
+        return claudeContinueGuided(payload.conversationHistory, payload.currentStep);
+    }
+);
+
+ipcMain.handle(
+    'openai-speech',
+    async (_e, payload: { text: string; voice: string; speed: number }) => {
+        return openaiTextToSpeech(payload.text, payload.voice, payload.speed);
+    }
+);
+
+ipcMain.handle(
+    'openai-transcribe',
+    async (_e, payload: { base64Audio: string; mimeType: string }) => {
+        return openaiTranscribe(payload.base64Audio, payload.mimeType);
+    }
+);
 
 ipcMain.handle('window-minimize', () => {
     mainWindow?.minimize();
@@ -171,6 +233,11 @@ ipcMain.handle('show-overlay', (_event, solution: string) => {
     }
     overlayWindow?.webContents.send('display-solution', solution);
     overlayWindow?.show();
+    applyOverlayPinState();
+    const opacity = Number(store.get('overlayOpacity'));
+    if (!Number.isNaN(opacity) && opacity >= 0.2 && opacity <= 1) {
+        overlayWindow?.setOpacity(opacity);
+    }
 });
 
 ipcMain.handle('hide-overlay', () => {
@@ -198,7 +265,14 @@ ipcMain.handle('send-captured-region', (_event, imageData: string) => {
     captureWindow?.close();
 });
 
-// App lifecycle
+ipcMain.handle('open-capture-window', () => {
+    if (captureWindow) {
+        captureWindow.focus();
+        return;
+    }
+    createCaptureWindow();
+});
+
 app.whenReady().then(() => {
     createMainWindow();
     registerGlobalShortcuts();

@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { Camera, Upload, ClipboardPaste, Keyboard, Image as ImageIcon } from 'lucide-react';
+import { Camera, Upload, ClipboardPaste, Keyboard, Image as ImageIcon, Loader2 } from 'lucide-react';
 import { Problem } from '../App';
 
 interface ProblemCaptureProps {
@@ -10,11 +10,14 @@ const ProblemCapture: React.FC<ProblemCaptureProps> = ({ onProblemSubmit }) => {
     const [isDragOver, setIsDragOver] = useState(false);
     const [previewImage, setPreviewImage] = useState<string | null>(null);
     const [textInput, setTextInput] = useState('');
+    const [isOcrWorking, setIsOcrWorking] = useState(false);
 
     const handleCapture = async () => {
-        if (window.electronAPI) {
-            // This will trigger the capture window in main process
-            // The image will come back via onProblemCaptured
+        if (window.electronAPI?.openCaptureWindow) {
+            await window.electronAPI.openCaptureWindow();
+            return;
+        }
+        if (window.electronAPI?.captureScreen) {
             const imageData = await window.electronAPI.captureScreen();
             if (imageData) {
                 setPreviewImage(imageData);
@@ -64,18 +67,43 @@ const ProblemCapture: React.FC<ProblemCaptureProps> = ({ onProblemSubmit }) => {
         }
     };
 
-    const handleSubmit = () => {
-        if (previewImage || textInput) {
-            const problem: Problem = {
-                id: Date.now().toString(),
-                imageData: previewImage || '',
-                text: textInput,
-                timestamp: new Date(),
-            };
-            onProblemSubmit(problem);
-            setPreviewImage(null);
-            setTextInput('');
+    const handleSubmit = async () => {
+        if (!previewImage && !textInput.trim()) return;
+
+        let combinedText = textInput.trim();
+        const imageData = previewImage || '';
+
+        if (previewImage && window.electronAPI) {
+            const stored = await window.electronAPI.getSettings();
+            const ocrOn = stored.ocrOnSubmit !== false;
+            if (ocrOn) {
+                setIsOcrWorking(true);
+                try {
+                    const { extractTextFromImage } = await import('../../services/OCRService');
+                    const ocr = await extractTextFromImage(previewImage);
+                    const t = ocr.text.trim();
+                    if (t) {
+                        combinedText = combinedText
+                            ? `${combinedText}\n\n[Extracted from image]\n${t}`
+                            : `[Extracted from image]\n${t}`;
+                    }
+                } catch {
+                    /* OCR optional */
+                } finally {
+                    setIsOcrWorking(false);
+                }
+            }
         }
+
+        const problem: Problem = {
+            id: Date.now().toString(),
+            imageData,
+            text: combinedText,
+            timestamp: new Date(),
+        };
+        onProblemSubmit(problem);
+        setPreviewImage(null);
+        setTextInput('');
     };
 
     return (
@@ -174,10 +202,12 @@ const ProblemCapture: React.FC<ProblemCaptureProps> = ({ onProblemSubmit }) => {
                     />
                     {textInput && (
                         <button
-                            onClick={handleSubmit}
-                            className="btn-primary mt-3"
+                            onClick={() => void handleSubmit()}
+                            className="btn-primary mt-3 flex items-center gap-2"
+                            disabled={isOcrWorking}
                         >
-                            Analyze Problem
+                            {isOcrWorking && <Loader2 className="w-4 h-4 animate-spin" />}
+                            {isOcrWorking ? 'Working…' : 'Analyze Problem'}
                         </button>
                     )}
                 </div>

@@ -7,10 +7,26 @@
   html {
     font-family: 'Inter', system-ui, sans-serif;
   }
+
+  html[data-font-size='small'] {
+    font-size: 14px;
+  }
+
+  html[data-font-size='medium'] {
+    font-size: 16px;
+  }
+
+  html[data-font-size='large'] {
+    font-size: 18px;
+  }
   
   body {
     @apply bg-slate-900 text-slate-100 antialiased;
     overflow: hidden;
+  }
+
+  html[data-theme='light'] body {
+    @apply bg-slate-100 text-slate-900;
   }
   
   /* Custom scrollbar */
@@ -140,6 +156,17 @@
       theme('colors.slate.900') 0%,
       theme('colors.slate.800') 50%,
       theme('colors.opal.900/0.3') 100%
+    );
+    background-size: 200% 200%;
+    animation: gradientMove 15s ease infinite;
+  }
+
+  .bg-animated-light {
+    background: linear-gradient(
+      135deg,
+      theme('colors.slate.100') 0%,
+      theme('colors.slate.200') 50%,
+      theme('colors.opal.100') 100%
     );
     background-size: 200% 200%;
     animation: gradientMove 15s ease infinite;

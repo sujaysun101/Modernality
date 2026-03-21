@@ -1,27 +1,52 @@
-// Voice Service using OpenAI TTS and Whisper APIs
+function base64ToArrayBuffer(base64: string): ArrayBuffer {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+    }
+    return bytes.buffer;
+}
 
-let openaiApiKey = '';
+async function blobToBase64(blob: Blob): Promise<string> {
+    const buf = await blob.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let binary = '';
+    for (let i = 0; i < bytes.byteLength; i++) {
+        binary += String.fromCharCode(bytes[i]);
+    }
+    return btoa(binary);
+}
 
-export async function setOpenAIApiKey(key: string): Promise<void> {
-    openaiApiKey = key;
+export async function setOpenAIApiKey(_key: string): Promise<void> {
+    /* Keys live in main process store (Settings). */
 }
 
 export async function getOpenAIApiKey(): Promise<string> {
-    if (!openaiApiKey && typeof window !== 'undefined' && window.electronAPI) {
+    if (typeof window !== 'undefined' && window.electronAPI) {
         const settings = await window.electronAPI.getSettings();
-        openaiApiKey = settings.openaiApiKey as string || '';
+        return (settings.openaiApiKey as string) || '';
     }
-    return openaiApiKey;
+    return '';
 }
 
-// Text-to-Speech using OpenAI TTS API
 export async function textToSpeech(
     text: string,
     voice: 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer' = 'nova',
     speed: number = 1.0
 ): Promise<ArrayBuffer | null> {
-    const apiKey = await getOpenAIApiKey();
+    if (typeof window !== 'undefined' && window.electronAPI?.openaiSpeech) {
+        const b64 = await window.electronAPI.openaiSpeech({
+            text,
+            voice,
+            speed: Math.max(0.25, Math.min(4.0, speed)),
+        });
+        if (!b64) {
+            return null;
+        }
+        return base64ToArrayBuffer(b64);
+    }
 
+    const apiKey = await getOpenAIApiKey();
     if (!apiKey) {
         console.warn('OpenAI API key not configured. Voice features disabled.');
         return null;
@@ -31,7 +56,7 @@ export async function textToSpeech(
         const response = await fetch('https://api.openai.com/v1/audio/speech', {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${apiKey}`,
+                Authorization: `Bearer ${apiKey}`,
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
@@ -53,10 +78,16 @@ export async function textToSpeech(
     }
 }
 
-// Speech-to-Text using OpenAI Whisper API
 export async function speechToText(audioBlob: Blob): Promise<string | null> {
-    const apiKey = await getOpenAIApiKey();
+    if (typeof window !== 'undefined' && window.electronAPI?.openaiTranscribe) {
+        const base64Audio = await blobToBase64(audioBlob);
+        return window.electronAPI.openaiTranscribe({
+            base64Audio,
+            mimeType: audioBlob.type || 'audio/webm',
+        });
+    }
 
+    const apiKey = await getOpenAIApiKey();
     if (!apiKey) {
         console.warn('OpenAI API key not configured. Voice input disabled.');
         return null;
@@ -71,7 +102,7 @@ export async function speechToText(audioBlob: Blob): Promise<string | null> {
         const response = await fetch('https://api.openai.com/v1/audio/transcriptions', {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${apiKey}`,
+                Authorization: `Bearer ${apiKey}`,
             },
             body: formData,
         });
@@ -80,15 +111,14 @@ export async function speechToText(audioBlob: Blob): Promise<string | null> {
             throw new Error(`Whisper API error: ${response.status}`);
         }
 
-        const data = await response.json();
-        return data.text;
+        const data = (await response.json()) as { text?: string };
+        return data.text ?? null;
     } catch (error) {
         console.error('Speech-to-text error:', error);
         return null;
     }
 }
 
-// Voice playback utility
 export class VoicePlayer {
     private audioContext: AudioContext | null = null;
     private currentSource: AudioBufferSourceNode | null = null;
@@ -98,14 +128,14 @@ export class VoicePlayer {
 
     constructor() {
         if (typeof window !== 'undefined') {
-            this.audioContext = new (window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
+            this.audioContext = new (window.AudioContext ||
+                (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext)();
         }
     }
 
     async play(audioData: ArrayBuffer): Promise<void> {
         if (!this.audioContext) return;
 
-        // Stop any currently playing audio
         this.stop();
 
         try {
@@ -115,7 +145,6 @@ export class VoicePlayer {
             this.currentSource.buffer = audioBuffer;
             this.currentSource.playbackRate.value = this.speed;
 
-            // Create gain node for volume control
             const gainNode = this.audioContext.createGain();
             gainNode.gain.value = this.volume;
 
@@ -139,7 +168,7 @@ export class VoicePlayer {
             try {
                 this.currentSource.stop();
             } catch {
-                // Ignore if already stopped
+                /* already stopped */
             }
             this.currentSource = null;
         }
@@ -148,13 +177,13 @@ export class VoicePlayer {
 
     pause(): void {
         if (this.audioContext && this.isPlaying) {
-            this.audioContext.suspend();
+            void this.audioContext.suspend();
         }
     }
 
     resume(): void {
         if (this.audioContext) {
-            this.audioContext.resume();
+            void this.audioContext.resume();
         }
     }
 
@@ -174,7 +203,6 @@ export class VoicePlayer {
     }
 }
 
-// Voice recorder for speech input
 export class VoiceRecorder {
     private mediaRecorder: MediaRecorder | null = null;
     private audioChunks: Blob[] = [];
@@ -183,11 +211,11 @@ export class VoiceRecorder {
     async startRecording(): Promise<boolean> {
         try {
             const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+                ? 'audio/webm;codecs=opus'
+                : 'audio/webm';
 
-            this.mediaRecorder = new MediaRecorder(stream, {
-                mimeType: 'audio/webm',
-            });
-
+            this.mediaRecorder = new MediaRecorder(stream, { mimeType });
             this.audioChunks = [];
 
             this.mediaRecorder.ondataavailable = (event) => {
@@ -196,7 +224,7 @@ export class VoiceRecorder {
                 }
             };
 
-            this.mediaRecorder.start(100); // Collect data every 100ms
+            this.mediaRecorder.start(100);
             this.isRecording = true;
             return true;
         } catch (error) {
@@ -213,15 +241,14 @@ export class VoiceRecorder {
             }
 
             this.mediaRecorder.onstop = () => {
-                const audioBlob = new Blob(this.audioChunks, { type: 'audio/webm' });
+                const mime = this.mediaRecorder?.mimeType || 'audio/webm';
+                const audioBlob = new Blob(this.audioChunks, { type: mime });
                 this.isRecording = false;
                 resolve(audioBlob);
             };
 
             this.mediaRecorder.stop();
-
-            // Stop all tracks
-            this.mediaRecorder.stream.getTracks().forEach(track => track.stop());
+            this.mediaRecorder.stream.getTracks().forEach((track) => track.stop());
         });
     }
 
@@ -230,11 +257,9 @@ export class VoiceRecorder {
     }
 }
 
-// Singleton instances for easy use
 export const voicePlayer = new VoicePlayer();
 export const voiceRecorder = new VoiceRecorder();
 
-// Helper function to speak text
 export async function speak(
     text: string,
     options: { voice?: 'alloy' | 'echo' | 'fable' | 'onyx' | 'nova' | 'shimmer'; speed?: number } = {}
@@ -245,13 +270,11 @@ export async function speak(
     }
 }
 
-// Helper function to listen and transcribe
 export async function listen(): Promise<string | null> {
     const started = await voiceRecorder.startRecording();
     if (!started) return null;
 
-    // Record for 5 seconds (in real use, this would be controlled by UI)
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    await new Promise((resolve) => setTimeout(resolve, 5000));
 
     const audioBlob = await voiceRecorder.stopRecording();
     if (!audioBlob) return null;

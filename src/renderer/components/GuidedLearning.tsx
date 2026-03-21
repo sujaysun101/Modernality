@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, Send, Mic, MicOff, Lightbulb, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 import { Problem } from '../App';
 import { solveWithAI, continueGuidedLearning } from '../../services/AIService';
+import { speechToText, voiceRecorder } from '../../services/VoiceService';
 import MathRenderer from './MathRenderer';
 
 interface GuidedLearningProps {
@@ -36,44 +37,59 @@ const GuidedLearning: React.FC<GuidedLearningProps> = ({ problem, onBack }) => {
     const [showHint, setShowHint] = useState(false);
     const chatEndRef = useRef<HTMLDivElement>(null);
 
-    // Initialize guided learning session
     useEffect(() => {
-        const initSession = async () => {
-            if (problem && state.conversationHistory.length === 0) {
-                setIsLoading(true);
-                try {
-                    const response = await solveWithAI(problem, 'guided');
+        if (!problem) return;
 
-                    // Parse the initial response and extract first guiding question
-                    const initialMessage: ConversationMessage = {
-                        role: 'ai',
-                        content: response.rawResponse,
-                        type: 'question',
-                    };
+        let cancelled = false;
+        setState({
+            currentStep: 1,
+            totalSteps: 7,
+            shownSteps: [],
+            conversationHistory: [],
+        });
 
-                    setState(prev => ({
-                        ...prev,
-                        conversationHistory: [initialMessage],
-                        totalSteps: response.steps.length || 7,
-                    }));
-                } catch (error) {
-                    console.error('Failed to initialize guided learning:', error);
-                    setState(prev => ({
-                        ...prev,
-                        conversationHistory: [{
-                            role: 'ai',
-                            content: "Let's work through this problem together! I'll guide you step by step. What information can you identify from the problem?",
-                            type: 'question',
-                        }],
-                    }));
-                } finally {
-                    setIsLoading(false);
+        (async () => {
+            setIsLoading(true);
+            try {
+                const response = await solveWithAI(problem, 'guided');
+                if (cancelled) return;
+                const initialMessage: ConversationMessage = {
+                    role: 'ai',
+                    content: response.rawResponse,
+                    type: 'question',
+                };
+                setState({
+                    currentStep: 1,
+                    totalSteps: response.steps.length || 7,
+                    shownSteps: [],
+                    conversationHistory: [initialMessage],
+                });
+            } catch (error) {
+                console.error('Failed to initialize guided learning:', error);
+                if (!cancelled) {
+                    setState({
+                        currentStep: 1,
+                        totalSteps: 7,
+                        shownSteps: [],
+                        conversationHistory: [
+                            {
+                                role: 'ai',
+                                content:
+                                    "Let's work through this problem together! I'll guide you step by step. What information can you identify from the problem?",
+                                type: 'question',
+                            },
+                        ],
+                    });
                 }
+            } finally {
+                if (!cancelled) setIsLoading(false);
             }
-        };
+        })();
 
-        initSession();
-    }, [problem]);
+        return () => {
+            cancelled = true;
+        };
+    }, [problem?.id]);
 
     // Auto-scroll to bottom
     useEffect(() => {
@@ -90,18 +106,19 @@ const GuidedLearning: React.FC<GuidedLearningProps> = ({ problem, onBack }) => {
             type: 'answer',
         };
 
+        const historyForApi = [...state.conversationHistory, userMessage];
+
         setState(prev => ({
             ...prev,
-            conversationHistory: [...prev.conversationHistory, userMessage],
+            conversationHistory: historyForApi,
         }));
         setUserInput('');
         setIsLoading(true);
 
         try {
-            // Get AI response
             const response = await continueGuidedLearning(
                 problem!,
-                [...state.conversationHistory, userMessage],
+                historyForApi.map((m) => ({ role: m.role, content: m.content })),
                 state.currentStep
             );
 
@@ -114,7 +131,7 @@ const GuidedLearning: React.FC<GuidedLearningProps> = ({ problem, onBack }) => {
 
             setState(prev => ({
                 ...prev,
-                conversationHistory: [...prev.conversationHistory, aiMessage],
+                conversationHistory: [...historyForApi, aiMessage],
                 currentStep: response.isCorrect ? prev.currentStep + 1 : prev.currentStep,
             }));
         } catch (error) {
@@ -132,9 +149,20 @@ const GuidedLearning: React.FC<GuidedLearningProps> = ({ problem, onBack }) => {
         }
     };
 
-    const toggleVoiceInput = () => {
-        setIsListening(!isListening);
-        // Voice recognition would be implemented here
+    const toggleVoiceInput = async () => {
+        if (isListening) {
+            setIsListening(false);
+            const blob = await voiceRecorder.stopRecording();
+            if (blob) {
+                const text = await speechToText(blob);
+                if (text?.trim()) {
+                    setUserInput((prev) => (prev ? `${prev} ${text.trim()}` : text.trim()));
+                }
+            }
+            return;
+        }
+        const ok = await voiceRecorder.startRecording();
+        setIsListening(ok);
     };
 
     const requestHint = () => {

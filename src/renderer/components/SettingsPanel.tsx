@@ -7,6 +7,7 @@ interface Settings {
     fontSize: 'small' | 'medium' | 'large';
     showStepNumbers: boolean;
     colorCodeSections: boolean;
+    ocrOnSubmit: boolean;
     voiceEnabled: boolean;
     voiceSpeed: number;
     voiceVolume: number;
@@ -30,6 +31,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onClose }) => {
         fontSize: 'medium',
         showStepNumbers: true,
         colorCodeSections: true,
+        ocrOnSubmit: true,
         voiceEnabled: true,
         voiceSpeed: 1.0,
         voiceVolume: 0.7,
@@ -64,7 +66,9 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onClose }) => {
             for (const [key, value] of Object.entries(settings)) {
                 await window.electronAPI.setSetting(key, value);
             }
+            await window.electronAPI.reregisterHotkeys();
         }
+        window.dispatchEvent(new CustomEvent('opal-settings-changed'));
         setIsSaving(false);
         onClose();
     };
@@ -76,11 +80,12 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onClose }) => {
             fontSize: 'medium',
             showStepNumbers: true,
             colorCodeSections: true,
+            ocrOnSubmit: true,
             voiceEnabled: true,
             voiceSpeed: 1.0,
             voiceVolume: 0.7,
             autoNarrateInLearning: true,
-            claudeApiKey: settings.claudeApiKey, // Keep API keys
+            claudeApiKey: settings.claudeApiKey,
             openaiApiKey: settings.openaiApiKey,
             hotkeys: {
                 capture: 'Ctrl+Shift+S',
@@ -286,7 +291,7 @@ const SettingsPanel: React.FC<SettingsPanelProps> = ({ onClose }) => {
                                 />
                             </div>
                             <p className="text-xs text-slate-500">
-                                Hot keys will take effect after restarting the application.
+                                Hotkeys apply when you save settings (no restart required).
                             </p>
                         </div>
                     )}

@@ -24,6 +24,18 @@ const SolutionDisplay: React.FC<SolutionDisplayProps> = ({
     const [isPinned, setIsPinned] = useState(false);
     const [copiedStep, setCopiedStep] = useState<number | null>(null);
 
+    useEffect(() => {
+        void (async () => {
+            if (window.electronAPI?.getOverlayPinned) {
+                try {
+                    setIsPinned(await window.electronAPI.getOverlayPinned());
+                } catch {
+                    /* ignore */
+                }
+            }
+        })();
+    }, []);
+
     // Fetch solution when problem changes
     useEffect(() => {
         const fetchSolution = async () => {
@@ -112,9 +124,14 @@ const SolutionDisplay: React.FC<SolutionDisplayProps> = ({
 
                 <div className="flex items-center gap-2">
                     <button
-                        onClick={() => setIsPinned(!isPinned)}
+                        type="button"
+                        onClick={() => void handleToggleOverlayPin()}
                         className={`btn-icon ${isPinned ? 'bg-opal-500/20 text-opal-400' : ''}`}
-                        title={isPinned ? 'Unpin overlay' : 'Pin overlay'}
+                        title={
+                            isPinned
+                                ? 'Unpin overlay (normal always-on-top)'
+                                : 'Pin overlay (stronger always-on-top)'
+                        }
                     >
                         <Pin className="w-4 h-4" />
                     </button>

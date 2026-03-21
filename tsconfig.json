@@ -20,7 +20,8 @@
         "noFallthroughCasesInSwitch": true
     },
     "include": [
-        "src/renderer"
+        "src/renderer",
+        "src/services"
     ],
     "references": [
         {
