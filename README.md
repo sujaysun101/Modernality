@@ -1,99 +1,47 @@
-# Opal AI Tutor
+# Modernality — Interactive AI Tutor, Whiteboard & Multimodal Study Studio
 
-An AI-powered desktop tutoring application that provides intelligent tutoring assistance by analyzing on-screen problems, offering step-by-step solutions, and enabling interactive learning through voice guidance and visual annotations.
+![Modernality Logo](frontend/logo.png)
 
-## Features
+**Modernality** combines a **Multi-Subject Course Synthesis Studio** with an **Interactive Problem Capture & Whiteboard Tutor**. Upload any lecture slides, textbooks, problem sets, code, or media to organize subjects into isolated Study Kits, or jump straight into the **Interactive Whiteboard & Solver** to capture any problem and work through it step-by-step.
 
-- **Solution Display Mode**: Get complete step-by-step solutions with math rendering
-- **Guided Learning Mode**: Interactive Socratic tutoring with Q&A
-- **Learning Mode**: Full demonstrations with voice narration and whiteboard
-- **Screen Capture**: Capture problems directly from your screen
-- **OCR**: Extract text from images using Tesseract.js
-- **Voice Integration**: Text-to-speech with OpenAI TTS, speech-to-text with Whisper
-- **Drawing Canvas**: Full whiteboard with pen, shapes, and colors
+---
 
-## Getting Started
+## Core Capabilities
 
-### Prerequisites
+### 1. Interactive Whiteboard & Problem Solver (`Whiteboard & Solver`)
+Capture any problem via **Screen Capture**, **Clipboard Paste (`Ctrl+V`)**, **Image Upload**, or **Text Input**, and work through it across three interactive modes:
+- **Solution Steps Mode**: Breaks problems into color-coded semantic step cards (`GIVEN` in blue, `FIND` in cyan, `FORMULA` in green, `WORK` in indigo, `NOTE` in purple, `ANSWER` in red) with KaTeX math rendering, step-by-step reasoning explanations, per-step copy, and `.txt` export.
+- **Guided Learning Mode**: A Socratic step-by-step coach with a visual progress bar (`Step X of Y`) that asks guiding questions without spoiling the final answer, validates each step with `✓ Correct!` or `Let's reconsider...` badges, offers conceptual hints, and supports voice input.
+- **Interactive Whiteboard Mode**:
+  - **HTML5 Drawing Canvas**: Draw with `Pen`, `Eraser`, `Circle`, `Box`, `Arrow`, and `Text` tools using semantic colors, adjustable stroke widths, grid overlay, and `Undo / Redo / Clear`.
+  - **Review My Whiteboard**: Send a snapshot of your handwritten canvas work to the tutor for instant step verification and targeted feedback.
+  - **Live AI Board Demo Player**: Watch and listen as the tutor animates color-coded equations and diagrams onto the whiteboard step-by-step with synchronized voice narration, Play/Pause, Skip Back/Forward, Mute, and playback speed (`0.75x–1.5x`) controls.
 
-- Node.js 18+
-- npm or yarn
-- API Keys (optional, for AI features):
-  - [Anthropic Claude API Key](https://console.anthropic.com)
-  - [OpenAI API Key](https://platform.openai.com)
+### 2. Multi-Subject Study Kit Studio
+- **Subject Separation & Material Append**: Group Study Kits into custom Subject folders (e.g., *Calculus III*, *Organic Chemistry*, *Algorithms*) and either create new Study Kits or append new files/links into an existing Study Kit at any time.
+- **Universal Material Ingestion (`backend/ingestion.py`)**:
+  - **Documents & Data**: PDF (`.pdf`), Word (`.docx`), PowerPoint (`.pptx`), Excel (`.xlsx`), CSV/TSV, ZIP archives (`.zip`)
+  - **Media & Code**: Images (`.png`, `.jpg`, `.webp`), Audio (`.mp3`, `.wav`), Video (`.mp4`, `.webm`), Jupyter Notebooks (`.ipynb`), source code, Markdown, LaTeX (`.tex`)
+  - **Links**: YouTube URLs (transcript extraction), public Google Drive links, and web articles
+- **Breakdown Explainer Player**: Synchronized voiceover narration, animated takeaways, KaTeX equations, Mermaid.js diagrams, and 1-click visual concept video generation.
+- **Lesson Plans & Guided Tutorials**: Multi-module curriculum with learning objectives, intuitive analogies, exam pitfalls, and interactive comprehension checks.
+- **Practice Simulator + 1-Click Whiteboard Bridge**: Auto-generated MCQs and free-response problems across Easy/Medium/Hard tiers with progressive hints, AI rubric grading, and a 1-click **"Open in Interactive Whiteboard & Solver →"** button on every problem.
+- **3D Spaced-Repetition Flashcards & Interactive Concept Graph**: SM-2 confidence scheduling (`Again`, `Hard`, `Good`, `Easy`) and an HTML5 physics-based knowledge graph.
+- **Multi-Turn & Live Voice/Screen AI Tutor**: Grounded in your active Study Kit with selectable personas (*Socratic Guide*, *ELI5*, *Graduate Deep Dive*, *Exam Coach*) and real-time voice + screen-sharing.
 
-### Installation
+---
 
-```bash
-# Install dependencies
-npm install
+## Security & Data Isolation
+- **Local-First Storage**: Uploaded files and Study Kits are stored locally in `data/` (excluded via `.gitignore`) with strict path-traversal and upload-size validation.
+- **Hardened HTTP Headers**: Enforces `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, and `Cache-Control: no-store` on API responses.
 
-# Run in development mode
-npm run dev
+---
+
+## Quick Start
+
+```powershell
+# 1. Install dependencies and start the server
+uv run python main.py
 ```
 
-### Building
-
-```bash
-# Build for production
-npm run build
-
-# Package for distribution
-npm run package
-```
-
-## Project Structure
-
-```
-src/
-├── main/                 # Electron main process
-│   ├── main.ts          # Main entry, window management
-│   └── preload.ts       # IPC bridge
-├── renderer/            # React frontend
-│   ├── App.tsx          # Main app component
-│   ├── components/      # UI components
-│   │   ├── TitleBar.tsx
-│   │   ├── ModeSelector.tsx
-│   │   ├── ProblemCapture.tsx
-│   │   ├── SolutionDisplay.tsx
-│   │   ├── GuidedLearning.tsx
-│   │   ├── LearningMode.tsx
-│   │   ├── DrawingCanvas.tsx
-│   │   ├── MathRenderer.tsx
-│   │   ├── SettingsPanel.tsx
-│   │   └── RecentProblems.tsx
-│   └── styles/
-│       └── index.css
-└── services/            # Core services
-    ├── AIService.ts     # Claude API integration
-    ├── VoiceService.ts  # OpenAI TTS/Whisper
-    └── OCRService.ts    # Tesseract OCR
-```
-
-## Keyboard Shortcuts
-
-| Shortcut | Action |
-|----------|--------|
-| `Ctrl+Shift+S` | Capture screen region |
-| `Ctrl+Shift+A` | Toggle solution overlay |
-
-## Configuration
-
-Open Settings (gear icon) to configure:
-- **Display**: Overlay opacity, font size, theme
-- **Voice**: Speed, volume, auto-narration
-- **Hotkeys**: Customize keyboard shortcuts
-- **API Keys**: Claude and OpenAI API keys
-
-## Tech Stack
-
-- **Frontend**: React 18, TypeScript, TailwindCSS
-- **Desktop**: Electron 28
-- **AI**: Anthropic Claude API
-- **Voice**: OpenAI TTS & Whisper
-- **OCR**: Tesseract.js
-- **Math Rendering**: KaTeX
-
-## License
-
-MIT
+Open **http://127.0.0.1:8000** in your browser.

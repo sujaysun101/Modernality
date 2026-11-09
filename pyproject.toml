@@ -1,0 +1,23 @@
+[project]
+name = "lumina-tutor"
+version = "0.1.0"
+description = "Add your description here"
+requires-python = ">=3.13"
+dependencies = [
+    "aiofiles>=25.1.0",
+    "beautifulsoup4>=4.15.0",
+    "fastapi>=0.162.2",
+    "google-cloud-firestore>=2.34.1",
+    "google-cloud-secret-manager>=2.32.0",
+    "google-cloud-storage>=3.17.1",
+    "google-genai>=2.30.1",
+    "httpx>=0.28.1",
+    "openpyxl>=3.1.5",
+    "pydantic>=2.14.3",
+    "pypdf>=7.0.0",
+    "python-docx>=1.2.0",
+    "python-multipart>=0.0.33",
+    "python-pptx>=1.0.2",
+    "uvicorn[standard]>=0.54.0",
+    "youtube-transcript-api>=1.2.5",
+]

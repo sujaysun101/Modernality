@@ -1,21 +1,53 @@
-steps:
-  - name: 'gcr.io/cloud-builders/docker'
-    id: 'Build'
-    args:
-      - 'build'
-      - '-t'
-      - 'gcr.io/$PROJECT_ID/$REPO_NAME:$COMMIT_SHA'
-      - '-t'
-      - 'gcr.io/$PROJECT_ID/$REPO_NAME:latest'
-      - '.'
+# ============================================================================
+# Google Cloud Build — Automated CI/CD Pipeline for Lumina Studio
+# Builds container image, pushes to Artifact Registry, and deploys to Cloud Run
+# with Cloud Firestore, Cloud Storage, and Secret Manager bindings.
+# ============================================================================
+substitutions:
+  _SERVICE_NAME: lumina-tutor
+  _REGION: us-east4
+  _AR_REPO: lumina-repo
+  _GCS_BUCKET: ${PROJECT_ID}-lumina-media
+  _FIRESTORE_DB: "(default)"
 
-  - name: 'gcr.io/cloud-builders/docker'
-    id: 'Push'
+steps:
+  # 1. Build the production Docker image
+  - name: "gcr.io/cloud-builders/docker"
     args:
-      - 'push'
-      - '--all-tags'
-      - 'gcr.io/$PROJECT_ID/$REPO_NAME'
+      - "build"
+      - "-t"
+      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE_NAME}:${COMMIT_SHA}"
+      - "-t"
+      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE_NAME}:latest"
+      - "."
+
+  # 2. Push image to Google Artifact Registry
+  - name: "gcr.io/cloud-builders/docker"
+    args:
+      - "push"
+      - "--all-tags"
+      - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE_NAME}"
+
+  # 3. Deploy to Google Cloud Run (with WebSocket Session Affinity & 3600s timeout for Gemini Live + Omni Video)
+  - name: "gcr.io/google.com/cloudsdktool/cloud-sdk"
+    entrypoint: gcloud
+    args:
+      - "run"
+      - "deploy"
+      - "${_SERVICE_NAME}"
+      - "--image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE_NAME}:latest"
+      - "--region=${_REGION}"
+      - "--platform=managed"
+      - "--allow-unauthenticated"
+      - "--memory=2Gi"
+      - "--cpu=2"
+      - "--timeout=3600"
+      - "--session-affinity"
+      - "--set-env-vars=GCP_PROJECT_ID=${PROJECT_ID},GCP_REGION=${_REGION},GCS_BUCKET_NAME=${_GCS_BUCKET},FIRESTORE_DATABASE=${_FIRESTORE_DB}"
+      - "--set-secrets=GEMINI_API_KEY=GEMINI_API_KEY:latest"
 
 images:
-  - 'gcr.io/$PROJECT_ID/$REPO_NAME:$COMMIT_SHA'
-  - 'gcr.io/$PROJECT_ID/$REPO_NAME:latest'
+  - "${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_SERVICE_NAME}:latest"
+
+options:
+  logging: CLOUD_LOGGING_ONLY

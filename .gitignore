@@ -1,10 +1,28 @@
-node_modules/
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
 dist/
-release/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+venv/
+env/
+
+# Environment variables & secrets
 .env
-*.log
+.env.*
+*.pem
+*.key
+
+# Local user study data & generated media
+data/
+*.db
+*.sqlite3
+
+# OS / Editor files
 .DS_Store
 Thumbs.db
-*.tsbuildinfo
-playwright-report/
-test-results/
+*.log

@@ -1,19 +1,38 @@
-# Stage 1: Build the React renderer
-FROM node:20-alpine AS builder
+# ============================================================================
+# Lumina Studio — Production Container for Google Cloud Run
+# Supports FastAPI + WebSockets (Gemini 3.8 Live) + ffmpeg (Gemini Omni 1.1 Flash)
+# ============================================================================
+FROM python:3.13-slim
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PORT=8080 \
+    HOST=0.0.0.0
 
 WORKDIR /app
 
-COPY package*.json ./
-RUN npm ci
+# Install system dependencies (ffmpeg for Gemini Omni 1.1 Flash video audio processing)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    curl \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-COPY . .
-RUN npm run build:renderer
+# Install uv for fast, deterministic dependency installation
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
-# Stage 2: Serve with nginx
-FROM nginx:alpine
+# Copy dependency definitions first for layer caching
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project
 
-COPY --from=builder /app/dist/renderer /usr/share/nginx/html
+# Copy application source
+COPY backend ./backend
+COPY frontend ./frontend
+COPY main.py ./
 
-EXPOSE 80
+# Ensure writable data directories for non-root execution on Cloud Run
+RUN mkdir -p /app/data/uploads /app/data/media /app/data/kits && chmod -R 777 /app/data
 
-CMD ["nginx", "-g", "daemon off;"]
+EXPOSE 8080
+
+CMD ["uv", "run", "uvicorn", "backend.main:app", "--host", "0.0.0.0", "--port", "8080", "--ws", "websockets"]
