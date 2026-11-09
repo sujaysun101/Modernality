@@ -10,8 +10,9 @@ import json
 import os
 import time
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional
 
+import httpx
 from google import genai
 from google.genai import types
 
@@ -31,12 +32,48 @@ TTS_MODEL = "gemini-3.8-flash-tts"
 OMNI_VIDEO_MODEL = "gemini-omni-1.1-flash"
 LIVE_VOICE_MODEL = "gemini-3.8-live"
 
+ELEVENLABS_VOICES: Dict[str, str] = {
+    "Rachel": "21m00Tcm4TlvDq8ikWAM",
+    "Josh": "TxGEqnHWrfWFTfGW9XjX",
+    "Bella": "EXAVITQu4vr4xnSDxMaL",
+    "Adam": "pNInz6obpgDQGcFmaJgB",
+    "Antoni": "ErXwobaYiN019PkySvjV",
+}
+DEFAULT_ELEVENLABS_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"
+
+
+def _load_dotenv_files() -> None:
+    """Safely loads key=value pairs from ~/.env and project .env into os.environ if not already set."""
+    candidates = [
+        Path.home() / ".env",
+        Path(__file__).resolve().parent.parent / ".env",
+    ]
+    for env_path in candidates:
+        if env_path.exists():
+            try:
+                for raw_line in env_path.read_text(encoding="utf-8", errors="ignore").splitlines():
+                    line = raw_line.strip()
+                    if not line or line.startswith("#") or "=" not in line:
+                        continue
+                    k, v = line.split("=", 1)
+                    k = k.strip()
+                    v = v.strip().strip('"').strip("'")
+                    if k and v and not os.environ.get(k):
+                        os.environ[k] = v
+            except Exception:
+                pass
+
+
+_load_dotenv_files()
+
 
 class GeminiTutorService:
     def __init__(self, media_dir: Path):
         self.media_dir = media_dir
         self.media_dir.mkdir(parents=True, exist_ok=True)
         self._runtime_api_key: Optional[str] = None
+        self._elevenlabs_api_key: Optional[str] = None
+        self._elevenlabs_voice_id: str = os.environ.get("ELEVENLABS_VOICE_ID", DEFAULT_ELEVENLABS_VOICE_ID)
 
     def set_api_key(self, key: str) -> None:
         if key and key.strip():
@@ -44,11 +81,103 @@ class GeminiTutorService:
             os.environ["GEMINI_API_KEY"] = self._runtime_api_key
 
     def get_api_key(self) -> Optional[str]:
+        _load_dotenv_files()
         return self._runtime_api_key or os.environ.get("GEMINI_API_KEY")
 
     def has_api_key(self) -> bool:
         key = self.get_api_key()
         return bool(key and len(key.strip()) > 8)
+
+    def set_elevenlabs_key(self, key: str, voice_id: Optional[str] = None) -> None:
+        if key and key.strip():
+            self._elevenlabs_api_key = key.strip()
+            os.environ["ELEVENLABS_API_KEY"] = self._elevenlabs_api_key
+        if voice_id and voice_id.strip():
+            resolved = ELEVENLABS_VOICES.get(voice_id.strip(), voice_id.strip())
+            self._elevenlabs_voice_id = resolved
+            os.environ["ELEVENLABS_VOICE_ID"] = resolved
+
+    def get_elevenlabs_key(self) -> Optional[str]:
+        _load_dotenv_files()
+        return self._elevenlabs_api_key or os.environ.get("ELEVENLABS_API_KEY")
+
+    def has_elevenlabs_key(self) -> bool:
+        key = self.get_elevenlabs_key()
+        return bool(key and len(key.strip()) > 8)
+
+    def get_elevenlabs_voice_id(self, requested_voice: Optional[str] = None) -> str:
+        if requested_voice and requested_voice.strip():
+            v = requested_voice.strip()
+            if v in ELEVENLABS_VOICES:
+                return ELEVENLABS_VOICES[v]
+            if len(v) >= 15:
+                return v
+        return self._elevenlabs_voice_id or DEFAULT_ELEVENLABS_VOICE_ID
+
+    def synthesize_elevenlabs_mp3(
+        self,
+        text: str,
+        voice_id: Optional[str] = None,
+        stability: float = 0.5,
+        similarity_boost: float = 0.78,
+    ) -> bytes:
+        """Synthesizes natural speech audio (MP3) using the ElevenLabs Text-to-Speech API."""
+        el_key = self.get_elevenlabs_key()
+        if not el_key:
+            raise RuntimeError("ElevenLabs API key is not configured.")
+        vid = self.get_elevenlabs_voice_id(voice_id)
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{vid}"
+        headers = {
+            "xi-api-key": el_key,
+            "Content-Type": "application/json",
+            "Accept": "audio/mpeg",
+        }
+        payload = {
+            "text": text,
+            "model_id": "eleven_flash_v2_5",
+            "voice_settings": {
+                "stability": stability,
+                "similarity_boost": similarity_boost,
+            },
+        }
+        with httpx.Client(timeout=45.0) as http_client:
+            resp = http_client.post(url, headers=headers, json=payload)
+            if resp.status_code != 200:
+                # Fallback to eleven_multilingual_v2 if flash_v2_5 is unavailable on tier
+                payload["model_id"] = "eleven_multilingual_v2"
+                resp = http_client.post(url, headers=headers, json=payload)
+            resp.raise_for_status()
+            return resp.content
+
+    async def stream_elevenlabs_pcm24k(
+        self,
+        text: str,
+        voice_id: Optional[str] = None,
+    ) -> AsyncIterator[bytes]:
+        """Streams low-latency 24kHz 16-bit mono PCM audio chunks from ElevenLabs for Live Voice sessions."""
+        el_key = self.get_elevenlabs_key()
+        if not el_key:
+            return
+        vid = self.get_elevenlabs_voice_id(voice_id)
+        url = f"https://api.elevenlabs.io/v1/text-to-speech/{vid}/stream?output_format=pcm_24000&optimize_streaming_latency=3"
+        headers = {
+            "xi-api-key": el_key,
+            "Content-Type": "application/json",
+        }
+        payload = {
+            "text": text,
+            "model_id": "eleven_flash_v2_5",
+            "voice_settings": {
+                "stability": 0.48,
+                "similarity_boost": 0.8,
+            },
+        }
+        async with httpx.AsyncClient(timeout=45.0) as async_client:
+            async with async_client.stream("POST", url, headers=headers, json=payload) as resp:
+                if resp.status_code == 200:
+                    async for chunk in resp.aiter_bytes(chunk_size=8192):
+                        if chunk:
+                            yield chunk
 
     def get_client(self, timeout_ms: Optional[int] = None) -> genai.Client:
         api_key = self.get_api_key()
@@ -155,9 +284,18 @@ class GeminiTutorService:
         voice_name: str = "Kore",
         style_direction: str = "warm, articulate, engaging educator explaining a key concept clearly",
     ) -> str:
-        """Generates expressive WAV voiceover narration for a breakdown slide using `gemini-3.8-flash-tts`."""
-        client = self.get_client(timeout_ms=120_000)
+        """Generates expressive voiceover narration using ElevenLabs when configured, with automatic fallback."""
         output_path = self.media_dir / output_filename
+
+        if self.has_elevenlabs_key():
+            try:
+                mp3_bytes = self.synthesize_elevenlabs_mp3(narration_text, voice_name)
+                output_path.write_bytes(mp3_bytes)
+                return f"/media/{output_filename}"
+            except Exception as el_err:
+                print(f"[ElevenLabs Slide TTS fallback]: {el_err}")
+
+        client = self.get_client(timeout_ms=120_000)
 
         interaction = client.interactions.create(
             model=TTS_MODEL,

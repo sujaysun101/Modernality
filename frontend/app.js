@@ -25,8 +25,12 @@ document.addEventListener('alpine:init', () => {
     activeTab: 'ingest', // 'ingest' | 'explainer' | 'lessons' | 'tutorials' | 'practice' | 'flashcards' | 'graph' | 'tutor' | 'cloud'
     theme: localStorage.getItem('modernality_theme') || 'dark',
     apiKeyConfigured: false,
+    elevenlabsConfigured: false,
     showApiKeyModal: false,
     apiKeyInput: '',
+    elevenlabsKeyInput: '',
+    elevenlabsVoice: 'Rachel',
+    wbDemoAudioEl: null,
     statusMessage: '',
     errorBanner: '',
 
@@ -361,6 +365,7 @@ document.addEventListener('alpine:init', () => {
         const res = await fetch('/api/status');
         const data = await res.json();
         this.apiKeyConfigured = !!data.api_key_configured;
+        this.elevenlabsConfigured = !!data.elevenlabs_configured;
         if (data.gcp) {
           this.gcpStatus = data.gcp;
           if (data.gcp.project_id && !this.gcpProjectInput) {
@@ -434,20 +439,27 @@ document.addEventListener('alpine:init', () => {
     },
 
     async saveApiKey() {
-      if (!this.apiKeyInput.trim()) return;
+      if (!this.apiKeyInput.trim() && !this.elevenlabsKeyInput.trim() && !this.elevenlabsVoice) return;
       try {
         const res = await fetch('/api/config/api-key', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ api_key: this.apiKeyInput.trim() }),
+          body: JSON.stringify({
+            api_key: this.apiKeyInput.trim() || null,
+            elevenlabs_api_key: this.elevenlabsKeyInput.trim() || null,
+            elevenlabs_voice_id: this.elevenlabsVoice || 'Rachel',
+          }),
         });
         if (!res.ok) {
           const err = await res.json();
-          throw new Error(err.detail || 'Invalid API key');
+          throw new Error(err.detail || 'Invalid API key configuration');
         }
-        this.apiKeyConfigured = true;
+        const data = await res.json();
+        this.apiKeyConfigured = !!data.api_key_configured;
+        this.elevenlabsConfigured = !!data.elevenlabs_configured;
         this.showApiKeyModal = false;
         this.apiKeyInput = '';
+        this.elevenlabsKeyInput = '';
         this.errorBanner = '';
       } catch (err) {
         this.errorBanner = err.message;
@@ -1178,12 +1190,19 @@ document.addEventListener('alpine:init', () => {
 
       this.liveWs.onmessage = (evt) => {
         const msg = JSON.parse(evt.data);
-        if (msg.type === 'audio' && msg.data) {
+        if (msg.type === 'connected') {
+          this.liveStatusText =
+            msg.voice_provider === 'elevenlabs'
+              ? 'Live Voice active (ElevenLabs API)'
+              : 'Live Voice active';
+        } else if (msg.type === 'audio' && msg.data) {
           this.playPcm24kChunk(msg.data);
+        } else if (msg.type === 'elevenlabs_mp3' && msg.data) {
+          this.playElevenLabsMp3Base64(msg.data);
         } else if (msg.type === 'input_transcript') {
           this.liveTranscripts.push({ role: 'You', text: msg.text });
         } else if (msg.type === 'output_transcript') {
-          this.liveTranscripts.push({ role: 'Lumina', text: msg.text });
+          this.liveTranscripts.push({ role: 'Modernality', text: msg.text });
         } else if (msg.type === 'interrupted') {
           this.clearLiveAudioPlaybackQueue();
         } else if (msg.type === 'error') {
@@ -1270,6 +1289,30 @@ document.addEventListener('alpine:init', () => {
       source.start(startAt);
       this.nextPlayTime = startAt + audioBuffer.duration;
       this.activeAudioSources.push(source);
+    },
+
+    async playElevenLabsMp3Base64(base64Mp3) {
+      try {
+        if (!this.audioContextOut) {
+          this.audioContextOut = new (window.AudioContext || window.webkitAudioContext)();
+          this.nextPlayTime = this.audioContextOut.currentTime;
+        }
+        const binary = atob(base64Mp3);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
+        const audioBuffer = await this.audioContextOut.decodeAudioData(bytes.buffer.slice(0));
+        const source = this.audioContextOut.createBufferSource();
+        source.buffer = audioBuffer;
+        source.connect(this.audioContextOut.destination);
+        const startAt = Math.max(this.audioContextOut.currentTime, this.nextPlayTime);
+        source.start(startAt);
+        this.nextPlayTime = startAt + audioBuffer.duration;
+        this.activeAudioSources.push(source);
+      } catch (err) {
+        console.error('ElevenLabs MP3 playback error:', err);
+      }
     },
 
     clearLiveAudioPlaybackQueue() {
@@ -1940,7 +1983,7 @@ document.addEventListener('alpine:init', () => {
       this.playCurrentWbDemoStepVoice();
     },
 
-    playCurrentWbDemoStepVoice() {
+    async playCurrentWbDemoStepVoice() {
       if (!this.wbDemoPlaying || !this.wbDemoData?.steps?.length) return;
       this.redrawWhiteboard();
       this.$nextTick(() => this.typesetMath());
@@ -1951,37 +1994,65 @@ document.addEventListener('alpine:init', () => {
         return;
       }
 
+      const advanceNextStep = () => {
+        if (!this.wbDemoPlaying) return;
+        if (this.wbDemoStepIndex < this.wbDemoData.steps.length - 1) {
+          this.wbDemoStepIndex++;
+          this.playCurrentWbDemoStepVoice();
+        } else {
+          this.wbDemoPlaying = false;
+        }
+      };
+
+      if (!this.wbDemoMuted && step.narration && this.elevenlabsConfigured) {
+        try {
+          const res = await fetch('/api/tts/elevenlabs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              text: step.narration,
+              voice_id: this.elevenlabsVoice || 'Rachel',
+            }),
+          });
+          if (res.ok && this.wbDemoPlaying) {
+            const data = await res.json();
+            if (data.audio_base64) {
+              if (this.wbDemoAudioEl) {
+                this.wbDemoAudioEl.pause();
+                this.wbDemoAudioEl = null;
+              }
+              const audio = new Audio(`data:audio/mpeg;base64,${data.audio_base64}`);
+              audio.playbackRate = this.wbDemoSpeed || 1.0;
+              audio.onended = () => advanceNextStep();
+              this.wbDemoAudioEl = audio;
+              await audio.play();
+              return;
+            }
+          }
+        } catch (err) {
+          console.warn('ElevenLabs whiteboard narration fallback:', err);
+        }
+      }
+
       if (!this.wbDemoMuted && 'speechSynthesis' in window && step.narration) {
         window.speechSynthesis.cancel();
         const utter = new SpeechSynthesisUtterance(step.narration);
         utter.rate = this.wbDemoSpeed || 1.0;
-        utter.onend = () => {
-          if (this.wbDemoPlaying) {
-            if (this.wbDemoStepIndex < this.wbDemoData.steps.length - 1) {
-              this.wbDemoStepIndex++;
-              this.playCurrentWbDemoStepVoice();
-            } else {
-              this.wbDemoPlaying = false;
-            }
-          }
-        };
+        utter.onend = () => advanceNextStep();
         window.speechSynthesis.speak(utter);
       } else {
         clearTimeout(this.wbDemoTimer);
-        this.wbDemoTimer = setTimeout(() => {
-          if (this.wbDemoPlaying && this.wbDemoStepIndex < this.wbDemoData.steps.length - 1) {
-            this.wbDemoStepIndex++;
-            this.playCurrentWbDemoStepVoice();
-          } else {
-            this.wbDemoPlaying = false;
-          }
-        }, 6000 / (this.wbDemoSpeed || 1.0));
+        this.wbDemoTimer = setTimeout(() => advanceNextStep(), 6000 / (this.wbDemoSpeed || 1.0));
       }
     },
 
     stopWbDemoPlayback() {
       this.wbDemoPlaying = false;
       clearTimeout(this.wbDemoTimer);
+      if (this.wbDemoAudioEl) {
+        this.wbDemoAudioEl.pause();
+        this.wbDemoAudioEl = null;
+      }
       if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     },
 

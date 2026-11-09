@@ -108,7 +108,14 @@ reload_all_kits()
 
 
 class ApiKeyRequest(BaseModel):
-    api_key: str
+    api_key: Optional[str] = None
+    elevenlabs_api_key: Optional[str] = None
+    elevenlabs_voice_id: Optional[str] = None
+
+
+class ElevenLabsTtsRequest(BaseModel):
+    text: str
+    voice_id: Optional[str] = None
 
 
 class GcpConfigRequest(BaseModel):
@@ -184,13 +191,8 @@ async def health_check() -> Dict[str, Any]:
 async def get_status() -> Dict[str, Any]:
     return {
         "api_key_configured": gemini_service.has_api_key(),
-        "models": {
-            "fast_synthesis": "gemini-3.8-flash",
-            "deep_reasoning": "gemini-4-argon",
-            "tts_voiceover": "gemini-3.8-flash-tts",
-            "video_generation": "gemini-omni-1.1-flash",
-            "live_tutor": "gemini-3.8-live",
-        },
+        "elevenlabs_configured": gemini_service.has_elevenlabs_key(),
+        "elevenlabs_voice_id": gemini_service.get_elevenlabs_voice_id(),
         "kit_count": len(STUDY_KITS),
         "gcp": gcp_backend.get_cloud_status(),
     }
@@ -237,10 +239,46 @@ async def force_cloud_sync() -> Dict[str, Any]:
 
 @app.post("/api/config/api-key")
 async def configure_api_key(req: ApiKeyRequest) -> Dict[str, Any]:
-    if not req.api_key or len(req.api_key.strip()) < 8:
-        raise HTTPException(status_code=400, detail="Please provide a valid Gemini API Key.")
-    gemini_service.set_api_key(req.api_key.strip())
-    return {"status": "ok", "api_key_configured": True}
+    if req.api_key and len(req.api_key.strip()) >= 8:
+        gemini_service.set_api_key(req.api_key.strip())
+    if req.elevenlabs_api_key or req.elevenlabs_voice_id:
+        gemini_service.set_elevenlabs_key(
+            req.elevenlabs_api_key or "",
+            req.elevenlabs_voice_id,
+        )
+    if not gemini_service.has_api_key() and not gemini_service.has_elevenlabs_key():
+        raise HTTPException(status_code=400, detail="Please provide a valid API key.")
+    return {
+        "status": "ok",
+        "api_key_configured": gemini_service.has_api_key(),
+        "elevenlabs_configured": gemini_service.has_elevenlabs_key(),
+        "elevenlabs_voice_id": gemini_service.get_elevenlabs_voice_id(),
+    }
+
+
+@app.post("/api/tts/elevenlabs")
+async def synthesize_elevenlabs_endpoint(req: ElevenLabsTtsRequest) -> Dict[str, Any]:
+    """Synthesizes live natural speech using the ElevenLabs API for Whiteboard Demos and Live Voice."""
+    if not gemini_service.has_elevenlabs_key():
+        raise HTTPException(
+            status_code=400,
+            detail="ElevenLabs API key is not configured. Open Settings to add your ElevenLabs API Key.",
+        )
+    if not req.text or not req.text.strip():
+        raise HTTPException(status_code=400, detail="Text is required for speech synthesis.")
+    try:
+        mp3_bytes = await asyncio.to_thread(
+            gemini_service.synthesize_elevenlabs_mp3,
+            req.text.strip(),
+            req.voice_id,
+        )
+        return {
+            "audio_base64": base64.b64encode(mp3_bytes).decode("ascii"),
+            "mime_type": "audio/mpeg",
+            "provider": "elevenlabs",
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"ElevenLabs Voice Error: {e}")
 
 
 @app.get("/api/kits")
@@ -616,40 +654,85 @@ async def interactive_guided_endpoint(req: GuidedStepRequest) -> Dict[str, Any]:
 async def live_tutor_websocket(websocket: WebSocket, kit_id: str) -> None:
     """
     Bidirectional WebSocket relay connecting the browser's microphone, camera/screen share,
-    and text stream directly to Gemini 3.8 Live (`gemini-3.8-live`).
+    and text stream to real-time multimodal listening + ElevenLabs Live Voice synthesis.
     """
     await websocket.accept()
 
     if not gemini_service.has_api_key():
         await websocket.send_json({
             "type": "error",
-            "message": "GEMINI_API_KEY is not set. Please configure your API key first.",
+            "message": "Please configure your API key in Settings first.",
         })
         await websocket.close()
         return
 
+    use_elevenlabs = gemini_service.has_elevenlabs_key()
     kit_rec = STUDY_KITS.get(kit_id, {})
     kit_data = kit_rec.get("kit", {})
     system_prompt = (
-        "You are Lumina, a warm, articulate, real-time voice and vision AI Tutor.\n"
+        "You are Modernality, a warm, articulate, real-time voice and vision AI Tutor.\n"
         f"You are currently tutoring the student on: {kit_data.get('title', 'their study materials')} "
         f"({kit_data.get('subject_area', '')}).\n"
         f"Summary: {kit_data.get('executive_summary', '')}\n"
-        "Keep spoken responses clear, conversational, and encouraging. When the student shares a screen frame "
-        "or camera snapshot, inspect the equations, diagrams, or code directly and walk them through it."
+        "Keep spoken responses clear, conversational, and encouraging (2 to 4 concise spoken sentences per turn). "
+        "When the student shares a screen frame or camera snapshot, inspect the equations, diagrams, or code directly and walk them through it."
     )
 
     client = gemini_service.get_client()
-    config = types.LiveConnectConfig(
-        response_modalities=[types.Modality.AUDIO],
-        system_instruction=types.Content(parts=[types.Part(text=system_prompt)]),
-        input_audio_transcription=types.AudioTranscriptionConfig(),
-        output_audio_transcription=types.AudioTranscriptionConfig(),
-    )
+    if use_elevenlabs:
+        config = types.LiveConnectConfig(
+            response_modalities=[types.Modality.TEXT],
+            system_instruction=types.Content(parts=[types.Part(text=system_prompt)]),
+            input_audio_transcription=types.AudioTranscriptionConfig(),
+        )
+    else:
+        config = types.LiveConnectConfig(
+            response_modalities=[types.Modality.AUDIO],
+            system_instruction=types.Content(parts=[types.Part(text=system_prompt)]),
+            input_audio_transcription=types.AudioTranscriptionConfig(),
+            output_audio_transcription=types.AudioTranscriptionConfig(),
+        )
+
+    async def speak_with_elevenlabs(spoken_text: str) -> None:
+        cleaned = re.sub(r"[`*_#]+", "", spoken_text or "").strip()
+        if not cleaned:
+            return
+        streamed_any = False
+        try:
+            async for pcm_chunk in gemini_service.stream_elevenlabs_pcm24k(cleaned):
+                streamed_any = True
+                await websocket.send_json({
+                    "type": "audio",
+                    "data": base64.b64encode(pcm_chunk).decode("ascii"),
+                    "sample_rate": 24000,
+                    "provider": "elevenlabs",
+                })
+        except Exception:
+            pass
+
+        if not streamed_any:
+            try:
+                mp3_bytes = await asyncio.to_thread(
+                    gemini_service.synthesize_elevenlabs_mp3,
+                    cleaned,
+                )
+                await websocket.send_json({
+                    "type": "elevenlabs_mp3",
+                    "data": base64.b64encode(mp3_bytes).decode("ascii"),
+                    "provider": "elevenlabs",
+                })
+            except Exception as el_err:
+                await websocket.send_json({
+                    "type": "error",
+                    "message": f"ElevenLabs Live Voice error: {el_err}",
+                })
 
     try:
         async with client.aio.live.connect(model=LIVE_VOICE_MODEL, config=config) as session:
-            await websocket.send_json({"type": "connected", "model": LIVE_VOICE_MODEL})
+            await websocket.send_json({
+                "type": "connected",
+                "voice_provider": "elevenlabs" if use_elevenlabs else "native",
+            })
 
             async def receive_from_browser() -> None:
                 try:
@@ -682,6 +765,7 @@ async def live_tutor_websocket(websocket: WebSocket, kit_id: str) -> None:
                         pass
 
             async def forward_from_gemini() -> None:
+                turn_text_buffer: List[str] = []
                 try:
                     async for response in session.receive():
                         content = response.server_content
@@ -690,7 +774,13 @@ async def live_tutor_websocket(websocket: WebSocket, kit_id: str) -> None:
 
                         if content.model_turn and content.model_turn.parts:
                             for part in content.model_turn.parts:
-                                if part.inline_data and part.inline_data.data:
+                                if getattr(part, "text", None):
+                                    turn_text_buffer.append(part.text)
+                                    await websocket.send_json({
+                                        "type": "output_transcript",
+                                        "text": part.text,
+                                    })
+                                if not use_elevenlabs and part.inline_data and part.inline_data.data:
                                     b64_audio = base64.b64encode(part.inline_data.data).decode("ascii")
                                     await websocket.send_json({
                                         "type": "audio",
@@ -709,12 +799,21 @@ async def live_tutor_websocket(websocket: WebSocket, kit_id: str) -> None:
                                 "type": "output_transcript",
                                 "text": content.output_transcription.text,
                             })
+                            if use_elevenlabs:
+                                turn_text_buffer.append(content.output_transcription.text)
+
+                        if getattr(content, "turn_complete", False) and use_elevenlabs and turn_text_buffer:
+                            full_turn_text = "".join(turn_text_buffer).strip()
+                            turn_text_buffer.clear()
+                            if full_turn_text:
+                                await speak_with_elevenlabs(full_turn_text)
 
                         if content.interrupted is True:
+                            turn_text_buffer.clear()
                             await websocket.send_json({"type": "interrupted"})
                 except Exception as exc:
                     try:
-                        await websocket.send_json({"type": "error", "message": f"Gemini Live session ended: {exc}"})
+                        await websocket.send_json({"type": "error", "message": f"Live voice session ended: {exc}"})
                     except Exception:
                         pass
 
@@ -729,7 +828,7 @@ async def live_tutor_websocket(websocket: WebSocket, kit_id: str) -> None:
 
     except Exception as e:
         try:
-            await websocket.send_json({"type": "error", "message": f"Live API connection failed: {e}"})
+            await websocket.send_json({"type": "error", "message": f"Live voice connection failed: {e}"})
         except Exception:
             pass
 

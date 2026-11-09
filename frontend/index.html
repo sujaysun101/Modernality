@@ -33,10 +33,10 @@
   </style>
 
   <!-- Design System Stylesheet (Cache-Busted) -->
-  <link rel="stylesheet" href="/static/styles.css?v=20261109_v10" />
+  <link rel="stylesheet" href="/static/styles.css?v=20261109_v11" />
 
   <!-- Application Controller + Alpine.js (Cache-Busted) -->
-  <script defer src="/static/app.js?v=20261109_v10"></script>
+  <script defer src="/static/app.js?v=20261109_v11"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.3/dist/cdn.min.js"></script>
 </head>
 
@@ -1612,28 +1612,55 @@
     </div>
 
     <!-- ==================================================================
-         GEMINI API KEY MODAL
+         SETTINGS & ELEVENLABS LIVE VOICE MODAL
          ================================================================== -->
     <div x-show="showApiKeyModal" x-cloak class="modal-backdrop">
       <div class="modal-card" @click.outside="showApiKeyModal = false">
         <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
-          <h3 style="font-size: 16px; font-weight: 800; color: var(--text-primary);">Configure AI API Key</h3>
+          <h3 style="font-size: 16px; font-weight: 800; color: var(--text-primary);">Modernality Settings & Live Voice</h3>
           <button style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:16px;" @click="showApiKeyModal = false">✕</button>
         </div>
-        <p style="font-size: 12.5px; color: var(--text-secondary); line-height: 1.6; margin-bottom: 14px;">
-          Enter your API key to synthesize study kits, generate breakdown videos and voiceovers, and use the interactive AI Tutor.
-        </p>
-        <input
-          type="password"
-          x-model="apiKeyInput"
-          @keydown.enter.prevent="saveApiKey()"
-          placeholder="AIzaSy... or AQ..."
-          class="input-field font-mono"
-          style="margin-bottom: 16px;"
-        />
-        <div style="display: flex; justify-content: flex-end; gap: 8px;">
+
+        <div style="margin-bottom: 14px;">
+          <label class="field-label" style="display: flex; align-items: center; justify-content: space-between;">
+            <span>Core Study & Reasoning Key</span>
+            <span style="font-size: 10.5px;" :style="apiKeyConfigured ? 'color: var(--emerald-text);' : 'color: var(--text-muted);'" x-text="apiKeyConfigured ? '✓ Connected' : 'Not set'"></span>
+          </label>
+          <input
+            type="password"
+            x-model="apiKeyInput"
+            @keydown.enter.prevent="saveApiKey()"
+            placeholder="Enter key (leave blank to keep current)..."
+            class="input-field font-mono"
+          />
+        </div>
+
+        <div style="margin-bottom: 14px;">
+          <label class="field-label" style="display: flex; align-items: center; justify-content: space-between;">
+            <span>ElevenLabs Live Voice API Key</span>
+            <span style="font-size: 10.5px;" :style="elevenlabsConfigured ? 'color: var(--emerald-text);' : 'color: var(--text-muted);'" x-text="elevenlabsConfigured ? '✓ ElevenLabs Active' : 'Optional'"></span>
+          </label>
+          <input
+            type="password"
+            x-model="elevenlabsKeyInput"
+            @keydown.enter.prevent="saveApiKey()"
+            placeholder="xi-... or sk_... (ElevenLabs API Key)"
+            class="input-field font-mono"
+            style="margin-bottom: 10px;"
+          />
+          <label class="field-label">ElevenLabs Tutor Voice</label>
+          <select x-model="elevenlabsVoice" class="select-field">
+            <option value="Rachel">Rachel (Calm, Articulate Educator)</option>
+            <option value="Josh">Josh (Warm, Conversational Tutor)</option>
+            <option value="Bella">Bella (Expressive, Friendly Guide)</option>
+            <option value="Adam">Adam (Clear, University Lecturer)</option>
+            <option value="Antoni">Antoni (Energetic Exam Coach)</option>
+          </select>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
           <button class="btn" @click="showApiKeyModal = false">Cancel</button>
-          <button class="btn btn-primary" @click="saveApiKey()">Save API Key</button>
+          <button class="btn btn-primary" @click="saveApiKey()">Save Settings</button>
         </div>
       </div>
     </div>
