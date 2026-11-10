@@ -167,8 +167,11 @@ class TutorChatRequest(BaseModel):
 
 
 class UpdateKitSubjectRequest(BaseModel):
-    subject_area: str
+    subject_area: Optional[str] = None
     title: Optional[str] = None
+    custom_focus: Optional[str] = None
+    flashcards: Optional[List[Dict[str, Any]]] = None
+    sources: Optional[List[Dict[str, Any]]] = None
 
 
 class SubjectCreateRequest(BaseModel):
@@ -383,16 +386,27 @@ async def save_recent_problem_endpoint(req: RecentProblemRequest) -> Dict[str, A
 
 
 @app.patch("/api/kits/{kit_id}/subject")
+@app.patch("/api/kits/{kit_id}/metadata")
 async def update_kit_subject(kit_id: str, req: UpdateKitSubjectRequest) -> Dict[str, Any]:
     safe_id = validate_safe_kit_id(kit_id)
     if safe_id not in STUDY_KITS:
         raise HTTPException(status_code=404, detail=f"Study kit '{safe_id}' not found.")
     rec = STUDY_KITS[safe_id]
     if "kit" in rec and isinstance(rec["kit"], dict):
-        if req.subject_area and req.subject_area.strip():
-            rec["kit"]["subject_area"] = req.subject_area.strip()
-        if req.title and req.title.strip():
+        if req.subject_area is not None and req.subject_area.strip():
+            subj_clean = req.subject_area.strip()
+            rec["kit"]["subject_area"] = subj_clean
+            await asyncio.to_thread(pg_db.add_subject, subj_clean)
+        if req.title is not None and req.title.strip():
             rec["kit"]["title"] = req.title.strip()
+        if req.custom_focus is not None:
+            rec["custom_focus"] = req.custom_focus.strip()
+            rec["kit"]["custom_focus"] = req.custom_focus.strip()
+        if req.flashcards is not None:
+            rec["kit"]["flashcards"] = req.flashcards
+    if req.sources is not None:
+        rec["sources"] = req.sources
+    rec["updated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
     await asyncio.to_thread(persist_kit, rec)
     return STUDY_KITS[safe_id]
 
@@ -404,13 +418,15 @@ async def ingest_and_synthesize(
     raw_notes: str = Form(default=""),
     custom_focus: str = Form(default=""),
     subject_name: str = Form(default=""),
+    custom_title: str = Form(default=""),
+    retained_sources_json: str = Form(default=""),
     append_to_kit_id: str = Form(default=""),
     use_deep_model: bool = Form(default=False),
 ) -> Dict[str, Any]:
     if not gemini_service.has_api_key():
         raise HTTPException(
             status_code=400,
-            detail="Gemini API Key required! Click the 'API Key' button in the top bar to enter your GEMINI_API_KEY.",
+            detail="Backend API key is not configured.",
         )
 
     ingested_items: List[IngestedItem] = []
@@ -467,18 +483,21 @@ async def ingest_and_synthesize(
             )
         )
 
-    if not ingested_items:
-        raise HTTPException(
-            status_code=400,
-            detail="Please upload at least one file, add a YouTube/Drive/Web link, or paste study notes.",
-        )
-
-    # 4. If appending to an existing Study Kit, prepend its previously stored source items
+    # 4. If updating/appending to an existing Study Set, prepend its retained prior sources
     target_existing_rec: Optional[Dict[str, Any]] = None
     if append_to_kit_id and append_to_kit_id.strip() in STUDY_KITS:
         target_existing_rec = STUDY_KITS[append_to_kit_id.strip()]
+        existing_sources_list = target_existing_rec.get("sources", [])
+        if retained_sources_json and retained_sources_json.strip():
+            try:
+                parsed_retained = json.loads(retained_sources_json)
+                if isinstance(parsed_retained, list):
+                    existing_sources_list = parsed_retained
+            except Exception:
+                pass
+
         prior_items: List[IngestedItem] = []
-        for src_dict in target_existing_rec.get("sources", []):
+        for src_dict in existing_sources_list:
             if src_dict.get("extracted_text"):
                 prior_items.append(
                     IngestedItem(
@@ -490,27 +509,50 @@ async def ingest_and_synthesize(
                 )
         ingested_items = prior_items + ingested_items
 
+    if not ingested_items:
+        raise HTTPException(
+            status_code=400,
+            detail="Please upload at least one file, add a YouTube/Drive/Web link, paste study notes, or keep at least one existing source in the set.",
+        )
+
     effective_focus = custom_focus.strip()
-    if subject_name and subject_name.strip():
+    if not effective_focus and target_existing_rec:
         effective_focus = (
+            target_existing_rec.get("custom_focus")
+            or target_existing_rec.get("kit", {}).get("custom_focus")
+            or ""
+        ).strip()
+
+    prompt_focus = effective_focus
+    if subject_name and subject_name.strip():
+        prompt_focus = (
             f"Subject Area: {subject_name.strip()}. {effective_focus}".strip()
+        )
+    if custom_title and custom_title.strip():
+        prompt_focus = (
+            f"Preferred Study Set Title: {custom_title.strip()}. {prompt_focus}".strip()
         )
 
     try:
         study_kit = await asyncio.to_thread(
             gemini_service.synthesize_study_kit,
             ingested_items,
-            effective_focus,
+            prompt_focus,
             use_deep_model,
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Gemini Synthesis Error: {e}")
+        raise HTTPException(status_code=500, detail=f"Synthesis Error: {e}")
 
     kit_dump = study_kit.model_dump()
+    if custom_title and custom_title.strip():
+        kit_dump["title"] = custom_title.strip()
     if subject_name and subject_name.strip():
         kit_dump["subject_area"] = subject_name.strip()
+        await asyncio.to_thread(pg_db.add_subject, subject_name.strip())
     elif target_existing_rec and target_existing_rec.get("kit", {}).get("subject_area"):
         kit_dump["subject_area"] = target_existing_rec["kit"]["subject_area"]
+
+    kit_dump["custom_focus"] = effective_focus
 
     kit_id = (
         target_existing_rec["id"]
@@ -532,9 +574,11 @@ async def ingest_and_synthesize(
             else datetime.datetime.now(datetime.timezone.utc).isoformat()
         ),
         "updated_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "custom_focus": effective_focus,
         "sources": sources_serialized,
         "kit": kit_dump,
-        "slide_media": target_existing_rec.get("slide_media", {}) if target_existing_rec else {},
+        "card_ratings": target_existing_rec.get("card_ratings", {}) if target_existing_rec else {},
+        "slide_media": {},
     }
     await asyncio.to_thread(persist_kit, kit_record)
     return STUDY_KITS[kit_id]
@@ -630,13 +674,47 @@ async def grade_practice_submission(req: GradeSubmissionRequest) -> Dict[str, An
         raise HTTPException(status_code=500, detail=f"Grading Error: {e}")
 
 
+def build_kit_context_summary(kit_rec: Dict[str, Any]) -> str:
+    if not kit_rec:
+        return ""
+    kit_data = kit_rec.get("kit", {})
+    title = kit_data.get("title", "Untitled Study Set")
+    subj = kit_data.get("subject_area", "General")
+    goal = kit_rec.get("custom_focus") or kit_data.get("custom_focus") or ""
+    summary = kit_data.get("executive_summary", "")
+    sources = [s.get("source_name", "") for s in kit_rec.get("sources", []) if s.get("source_name")]
+    cards = kit_data.get("flashcards", [])[:25]
+    cards_txt = "\n".join(f"- {c.get('front', '')}: {c.get('back', '')}" for c in cards)
+    parts = [
+        f"Study Set Title: {title}",
+        f"Subject Area: {subj}",
+    ]
+    if goal:
+        parts.append(f"Student Study Goal / Exam Focus: {goal}")
+    if sources:
+        parts.append(f"Attached Study Sources ({len(sources)}): {', '.join(sources)}")
+    if summary:
+        parts.append(f"Executive Summary: {summary}")
+    if cards_txt:
+        parts.append(f"Key Flashcard Terms in Set:\n{cards_txt}")
+    return "\n".join(parts)
+
+
 @app.post("/api/tutor/chat")
 async def tutor_chat_turn(req: TutorChatRequest) -> Dict[str, Any]:
     if not gemini_service.has_api_key():
-        raise HTTPException(status_code=400, detail="Gemini API Key is not configured.")
+        raise HTTPException(status_code=400, detail="Backend API Key is not configured.")
 
     kit_rec = STUDY_KITS.get(req.kit_id, {})
-    kit_json_str = json.dumps(kit_rec.get("kit", {"note": "General tutoring session without a specific loaded study kit."}), indent=2)
+    kit_payload = dict(kit_rec.get("kit", {"note": "General tutoring session without a specific loaded study kit."}))
+    if kit_rec.get("custom_focus"):
+        kit_payload["custom_focus"] = kit_rec.get("custom_focus")
+    if kit_rec.get("sources"):
+        kit_payload["attached_sources"] = [
+            {"source_name": s.get("source_name"), "source_type": s.get("source_type")}
+            for s in kit_rec.get("sources", [])
+        ]
+    kit_json_str = json.dumps(kit_payload, indent=2)
 
     try:
         resp = await asyncio.to_thread(
@@ -660,9 +738,9 @@ async def tutor_chat_turn(req: TutorChatRequest) -> Dict[str, Any]:
 @app.post("/api/interactive/solve")
 async def interactive_solve_endpoint(req: InteractiveSolveRequest) -> Dict[str, Any]:
     if not gemini_service.has_api_key():
-        raise HTTPException(status_code=400, detail="Please configure your API key in Settings first.")
+        raise HTTPException(status_code=400, detail="Backend API Key is not configured.")
     kit_rec = STUDY_KITS.get(req.kit_id or "", {})
-    context_str = kit_rec.get("kit", {}).get("executive_summary", "")
+    context_str = build_kit_context_summary(kit_rec)
     try:
         res = await asyncio.to_thread(
             gemini_service.solve_interactive_problem,
@@ -679,9 +757,9 @@ async def interactive_solve_endpoint(req: InteractiveSolveRequest) -> Dict[str, 
 @app.post("/api/interactive/whiteboard")
 async def interactive_whiteboard_endpoint(req: InteractiveSolveRequest) -> Dict[str, Any]:
     if not gemini_service.has_api_key():
-        raise HTTPException(status_code=400, detail="Please configure your API key in Settings first.")
+        raise HTTPException(status_code=400, detail="Backend API Key is not configured.")
     kit_rec = STUDY_KITS.get(req.kit_id or "", {})
-    context_str = kit_rec.get("kit", {}).get("executive_summary", "")
+    context_str = build_kit_context_summary(kit_rec)
     try:
         res = await asyncio.to_thread(
             gemini_service.generate_whiteboard_demo,
@@ -698,7 +776,7 @@ async def interactive_whiteboard_endpoint(req: InteractiveSolveRequest) -> Dict[
 @app.post("/api/interactive/guided")
 async def interactive_guided_endpoint(req: GuidedStepRequest) -> Dict[str, Any]:
     if not gemini_service.has_api_key():
-        raise HTTPException(status_code=400, detail="Please configure your API key in Settings first.")
+        raise HTTPException(status_code=400, detail="Backend API Key is not configured.")
     try:
         res = await asyncio.to_thread(
             gemini_service.continue_guided_step,
@@ -725,19 +803,17 @@ async def live_tutor_websocket(websocket: WebSocket, kit_id: str) -> None:
     if not gemini_service.has_api_key():
         await websocket.send_json({
             "type": "error",
-            "message": "Please configure your API key in Settings first.",
+            "message": "Backend API Key is not configured.",
         })
         await websocket.close()
         return
 
     use_elevenlabs = gemini_service.has_elevenlabs_key()
     kit_rec = STUDY_KITS.get(kit_id, {})
-    kit_data = kit_rec.get("kit", {})
+    kit_context = build_kit_context_summary(kit_rec)
     system_prompt = (
         "You are Modernality, a warm, articulate, real-time voice and vision AI Tutor.\n"
-        f"You are currently tutoring the student on: {kit_data.get('title', 'their study materials')} "
-        f"({kit_data.get('subject_area', '')}).\n"
-        f"Summary: {kit_data.get('executive_summary', '')}\n"
+        f"{kit_context}\n"
         "Keep spoken responses clear, conversational, and encouraging (2 to 4 concise spoken sentences per turn). "
         "When the student shares a screen frame or camera snapshot, inspect the equations, diagrams, or code directly and walk them through it."
     )

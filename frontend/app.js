@@ -63,17 +63,26 @@ document.addEventListener('alpine:init', () => {
     newSubjectDraft: '',
     showNewSubjectInput: false,
 
-    // Ingestion State
+    // Ingestion & Study Set Editing State
     selectedFiles: [],
     urlInput: '',
     addedUrls: [],
     rawNotes: '',
     customFocus: '',
     ingestSubjectName: '',
+    ingestSetTitle: '',
+    editableSources: [],
     ingestMode: 'new_kit', // 'new_kit' | 'append_kit'
     useDeepModel: false,
     isSynthesizing: false,
+    isSavingMetadata: false,
     synthesisStepText: '',
+
+    // Inline Flashcard Term Editor State
+    editingCardId: null,
+    editCardDraft: { front: '', back: '', category: 'Core Concept', mnemonic_or_tip: '' },
+    showAddCardForm: false,
+    newCardDraft: { front: '', back: '', category: 'Core Concept', mnemonic_or_tip: '' },
 
     // Breakdown Explainer Player State
     currentSlideIndex: 0,
@@ -587,6 +596,12 @@ document.addEventListener('alpine:init', () => {
         this.currentCardIndex = 0;
         this.isCardFlipped = false;
         this.cardRatings = data.card_ratings || {};
+        this.editableSources = [...(data.sources || [])];
+        this.ingestSetTitle = data.kit?.title || '';
+        this.ingestSubjectName = data.kit?.subject_area || '';
+        this.customFocus = data.custom_focus || data.kit?.custom_focus || '';
+        this.editingCardId = null;
+        this.showAddCardForm = false;
         this.resetProblemView();
 
         // Hydrate saved slide media (TTS audio & Omni Flash video URLs)
@@ -600,10 +615,13 @@ document.addEventListener('alpine:init', () => {
 
         // Seed welcome chat message for this kit
         this.lastInteractionId = null;
+        const focusNote = (data.custom_focus || data.kit?.custom_focus)
+          ? `\n**Study Goal:** ${data.custom_focus || data.kit?.custom_focus}`
+          : '';
         this.chatMessages = [
           {
             role: 'assistant',
-            content: `Welcome to **${data.kit.title}**! I've analyzed all ${data.sources?.length || 1} source material(s).\n\nAsk me to break down any formula, quiz you Socratic-style, walk through an example, or attach a screenshot of a problem you're working on!`,
+            content: `Welcome to **${data.kit.title}**! I've loaded all ${data.sources?.length || 1} source material(s) and ${(data.kit.flashcards || []).length} study terms.${focusNote}\n\nAsk me to break down any concept, quiz you Socratic-style, walk through an example, or attach a screenshot of a problem you're working on!`,
           },
         ];
 
@@ -612,6 +630,142 @@ document.addEventListener('alpine:init', () => {
           this.typesetMath();
           if (this.activeTab === 'graph') this.initConceptGraphCanvas();
         });
+      } catch (err) {
+        this.errorBanner = err.message;
+      }
+    },
+
+    openEditStudySet() {
+      if (!this.hasActiveKit) return;
+      this.ingestMode = 'append_kit';
+      this.ingestSetTitle = this.kit.title || '';
+      this.ingestSubjectName = this.kit.subject_area || '';
+      this.customFocus = this.currentKitRecord?.custom_focus || this.kit.custom_focus || '';
+      this.editableSources = [...(this.currentKitRecord?.sources || [])];
+      this.activeTab = 'ingest';
+    },
+
+    startNewStudySet() {
+      this.ingestMode = 'new_kit';
+      this.ingestSetTitle = '';
+      this.customFocus = '';
+      this.selectedFiles = [];
+      this.addedUrls = [];
+      this.rawNotes = '';
+      this.activeTab = 'ingest';
+    },
+
+    removeExistingSource(idx) {
+      this.editableSources.splice(idx, 1);
+    },
+
+    async saveStudySetMetadataOnly() {
+      if (!this.currentKitId) return;
+      this.isSavingMetadata = true;
+      this.errorBanner = '';
+      try {
+        const res = await fetch(`/api/kits/${this.currentKitId}/metadata`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: this.ingestSetTitle.trim() || this.kit.title,
+            subject_area: this.ingestSubjectName.trim() || this.kit.subject_area || 'General',
+            custom_focus: this.customFocus.trim(),
+            sources: this.editableSources,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json();
+          throw new Error(err.detail || 'Could not save study set details');
+        }
+        const updatedRec = await res.json();
+        this.currentKitRecord = updatedRec;
+        await this.fetchSubjectsList();
+        await this.fetchKitsList();
+        await this.loadStudyKit(this.currentKitId);
+        this.activeTab = 'flashcards';
+      } catch (err) {
+        this.errorBanner = err.message;
+      } finally {
+        this.isSavingMetadata = false;
+      }
+    },
+
+    startEditingCard(card) {
+      this.editingCardId = card.id;
+      this.editCardDraft = {
+        front: card.front || '',
+        back: card.back || '',
+        category: card.category || 'Core Concept',
+        mnemonic_or_tip: card.mnemonic_or_tip || '',
+      };
+    },
+
+    cancelEditingCard() {
+      this.editingCardId = null;
+    },
+
+    async saveEditedCard(cardId) {
+      if (!this.currentKitId) return;
+      const cards = [...(this.kit.flashcards || [])];
+      const idx = cards.findIndex((c) => c.id === cardId);
+      if (idx === -1) return;
+      cards[idx] = {
+        ...cards[idx],
+        front: this.editCardDraft.front.trim() || cards[idx].front,
+        back: this.editCardDraft.back.trim() || cards[idx].back,
+        category: this.editCardDraft.category.trim() || 'Core Concept',
+        mnemonic_or_tip: this.editCardDraft.mnemonic_or_tip.trim(),
+      };
+      await this.persistFlashcardsArray(cards);
+      this.editingCardId = null;
+    },
+
+    async deleteFlashcard(cardId) {
+      if (!this.currentKitId) return;
+      const cards = (this.kit.flashcards || []).filter((c) => c.id !== cardId);
+      await this.persistFlashcardsArray(cards);
+      if (this.currentCardIndex >= cards.length) {
+        this.currentCardIndex = Math.max(0, cards.length - 1);
+      }
+    },
+
+    async addNewFlashcard() {
+      if (!this.currentKitId) return;
+      const front = (this.newCardDraft.front || '').trim();
+      const back = (this.newCardDraft.back || '').trim();
+      if (!front || !back) {
+        this.errorBanner = 'Please enter both a Term and a Definition.';
+        return;
+      }
+      const cards = [
+        ...(this.kit.flashcards || []),
+        {
+          id: `card_${Date.now().toString(36)}`,
+          front,
+          back,
+          category: (this.newCardDraft.category || 'Core Concept').trim(),
+          mnemonic_or_tip: (this.newCardDraft.mnemonic_or_tip || '').trim(),
+        },
+      ];
+      await this.persistFlashcardsArray(cards);
+      this.newCardDraft = { front: '', back: '', category: 'Core Concept', mnemonic_or_tip: '' };
+      this.showAddCardForm = false;
+    },
+
+    async persistFlashcardsArray(cards) {
+      try {
+        const res = await fetch(`/api/kits/${this.currentKitId}/metadata`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ flashcards: cards }),
+        });
+        if (res.ok) {
+          const updated = await res.json();
+          this.currentKitRecord = updated;
+          await this.fetchKitsList();
+          this.$nextTick(() => this.typesetMath());
+        }
       } catch (err) {
         this.errorBanner = err.message;
       }
@@ -668,23 +822,27 @@ document.addEventListener('alpine:init', () => {
     },
 
     async synthesizeCourse() {
-      if (
-        this.selectedFiles.length === 0 &&
-        this.addedUrls.length === 0 &&
-        !this.urlInput.trim() &&
-        !this.rawNotes.trim()
-      ) {
-        this.errorBanner = 'Please add at least one file, link, or study notes.';
-        return;
-      }
-
       if (this.urlInput.trim()) {
         this.addUrlToList();
       }
 
+      const isUpdatingExisting = this.ingestMode === 'append_kit' && !!this.currentKitId;
+      const hasNewMaterials =
+        this.selectedFiles.length > 0 ||
+        this.addedUrls.length > 0 ||
+        !!this.rawNotes.trim();
+      const hasRetainedSources = isUpdatingExisting && this.editableSources.length > 0;
+
+      if (!hasNewMaterials && !hasRetainedSources) {
+        this.errorBanner = 'Please add at least one file, link, or study notes.';
+        return;
+      }
+
       this.errorBanner = '';
       this.isSynthesizing = true;
-      this.synthesisStepText = 'Extracting sources & building flashcards, tests, and study guide...';
+      this.synthesisStepText = isUpdatingExisting
+        ? 'Updating study set & regenerating flashcards, learn modules, tests, and breakdown...'
+        : 'Extracting sources & building flashcards, tests, and study guide...';
 
       const formData = new FormData();
       for (const file of this.selectedFiles) {
@@ -694,8 +852,10 @@ document.addEventListener('alpine:init', () => {
       formData.append('raw_notes', this.rawNotes);
       formData.append('custom_focus', this.customFocus);
       formData.append('subject_name', this.ingestSubjectName.trim());
-      if (this.ingestMode === 'append_kit' && this.currentKitId) {
+      formData.append('custom_title', this.ingestSetTitle.trim());
+      if (isUpdatingExisting) {
         formData.append('append_to_kit_id', this.currentKitId);
+        formData.append('retained_sources_json', JSON.stringify(this.editableSources));
       }
       formData.append('use_deep_model', this.useDeepModel ? 'true' : 'false');
 
@@ -716,6 +876,7 @@ document.addEventListener('alpine:init', () => {
           throw new Error(err.detail || 'Study set synthesis failed');
         }
         const newKitRecord = await res.json();
+        await this.fetchSubjectsList();
         await this.fetchKitsList();
         await this.loadStudyKit(newKitRecord.id);
 

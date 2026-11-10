@@ -95,7 +95,7 @@
     <div class="qz-nav-right">
       <button
         class="qz-btn qz-btn-primary qz-btn-pill"
-        @click="activeTab = 'ingest'; ingestMode = 'new_kit'"
+        @click="startNewStudySet()"
         title="Create a new study set"
       >
         <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
@@ -152,7 +152,10 @@
               x-text="kit.subject_area || 'General Subject'"
             ></span>
             <span style="color: var(--text-muted);">/</span>
-            <span style="color: var(--text-secondary);" x-text="`${(kit.flashcards || []).length} terms • ${(kit.practice_problems || []).length} questions`"></span>
+            <span style="color: var(--text-secondary);" x-text="`${(kit.flashcards || []).length} terms • ${(kit.practice_problems || []).length} questions • ${sources.length} source(s)`"></span>
+            <template x-if="currentKitRecord?.custom_focus || kit.custom_focus">
+              <span class="qz-badge qz-badge-indigo" style="margin-left: 6px;" x-text="`🎯 Goal: ${currentKitRecord?.custom_focus || kit.custom_focus}`"></span>
+            </template>
           </div>
 
           <div class="qz-set-title-row">
@@ -161,9 +164,9 @@
               <button
                 class="qz-btn"
                 style="padding: 7px 14px; font-size: 13px;"
-                @click="ingestMode = 'append_kit'; ingestSubjectName = kit.subject_area || ''; activeTab = 'ingest'"
+                @click="openEditStudySet()"
               >
-                + Add Materials to Set
+                ✎ Edit Set &amp; Sources
               </button>
               <button
                 class="qz-btn"
@@ -386,35 +389,121 @@
         </div>
       </template>
 
-      <!-- Signature Quizlet "Terms in this set (N)" Section -->
+      <!-- Signature Quizlet "Terms in this set (N)" Section with Inline Editor -->
       <div class="qz-terms-section">
         <div class="qz-terms-header">
           <h2 class="qz-terms-title" x-text="`Terms in this set (${filteredFlashcards.length})`"></h2>
-          <span style="font-size: 13px; color: var(--text-muted);">Click speaker to hear pronunciation</span>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <button
+              class="qz-btn"
+              style="padding: 6px 14px; font-size: 13px;"
+              @click="showAddCardForm = !showAddCardForm"
+            >
+              <span x-text="showAddCardForm ? 'Cancel' : '+ Add Term'"></span>
+            </button>
+            <button
+              class="qz-btn"
+              style="padding: 6px 14px; font-size: 13px;"
+              @click="openEditStudySet()"
+            >
+              ✎ Edit Set / Add Files
+            </button>
+          </div>
+        </div>
+
+        <!-- Inline Add New Term Card -->
+        <div x-show="showAddCardForm" x-cloak class="qz-card" style="margin-bottom: 14px; border-color: var(--brand-primary);">
+          <div style="font-size: 14px; font-weight: 800; color: var(--brand-primary); margin-bottom: 12px;">Add a New Term to This Set</div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 12px;">
+            <div>
+              <label class="qz-label">Term / Front</label>
+              <textarea x-model="newCardDraft.front" rows="2" placeholder="Enter term, concept, or question..." class="qz-textarea"></textarea>
+            </div>
+            <div>
+              <label class="qz-label">Definition / Back</label>
+              <textarea x-model="newCardDraft.back" rows="2" placeholder="Enter definition, formula, or explanation..." class="qz-textarea"></textarea>
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 2fr auto; gap: 12px; align-items: end;">
+            <div>
+              <label class="qz-label">Category Tag</label>
+              <input type="text" x-model="newCardDraft.category" placeholder="Core Concept" class="qz-input" />
+            </div>
+            <div>
+              <label class="qz-label">Memory Tip / Mnemonic (Optional)</label>
+              <input type="text" x-model="newCardDraft.mnemonic_or_tip" placeholder="Optional memory hook..." class="qz-input" />
+            </div>
+            <button class="qz-btn qz-btn-primary" @click="addNewFlashcard()">Save Term</button>
+          </div>
         </div>
 
         <template x-for="(card, cIdx) in filteredFlashcards" :key="card.id || cIdx">
           <div class="qz-term-row">
-            <div class="qz-term-front" x-html="renderMarkdown(card.front)"></div>
-            <div class="qz-term-divider"></div>
-            <div>
-              <div class="qz-term-back" x-html="renderMarkdown(card.back)"></div>
-              <template x-if="card.mnemonic_or_tip">
-                <div style="margin-top: 6px; font-size: 12.5px; color: var(--accent-gold-text); font-weight: 600;" x-text="`💡 ${card.mnemonic_or_tip}`"></div>
-              </template>
-            </div>
-            <div class="qz-term-actions">
-              <button
-                class="qz-btn qz-btn-icon"
-                style="width: 34px; height: 34px;"
-                @click="speakTextAloud(`${card.front}. ${card.back}`)"
-                title="Listen aloud"
-              >
-                <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path stroke-linecap="round" d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
-                </svg>
-              </button>
-            </div>
+            <template x-if="editingCardId !== card.id">
+              <div style="display: contents;">
+                <div class="qz-term-front" x-html="renderMarkdown(card.front)"></div>
+                <div class="qz-term-divider"></div>
+                <div>
+                  <div class="qz-term-back" x-html="renderMarkdown(card.back)"></div>
+                  <template x-if="card.mnemonic_or_tip">
+                    <div style="margin-top: 6px; font-size: 12.5px; color: var(--accent-gold-text); font-weight: 600;" x-text="`💡 ${card.mnemonic_or_tip}`"></div>
+                  </template>
+                </div>
+                <div class="qz-term-actions">
+                  <button
+                    class="qz-btn qz-btn-icon"
+                    style="width: 34px; height: 34px;"
+                    @click="speakTextAloud(`${card.front}. ${card.back}`)"
+                    title="Listen aloud"
+                  >
+                    <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path stroke-linecap="round" d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                    </svg>
+                  </button>
+                  <button
+                    class="qz-btn qz-btn-icon"
+                    style="width: 34px; height: 34px;"
+                    @click="startEditingCard(card)"
+                    title="Edit term"
+                  >
+                    ✎
+                  </button>
+                  <button
+                    class="qz-btn qz-btn-icon"
+                    style="width: 34px; height: 34px; color: var(--learning-coral);"
+                    @click="deleteFlashcard(card.id)"
+                    title="Delete term"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+            </template>
+
+            <template x-if="editingCardId === card.id">
+              <div style="grid-column: 1 / -1; display: flex; flex-direction: column; gap: 12px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                  <div>
+                    <label class="qz-label">Term / Front</label>
+                    <textarea x-model="editCardDraft.front" rows="2" class="qz-textarea"></textarea>
+                  </div>
+                  <div>
+                    <label class="qz-label">Definition / Back</label>
+                    <textarea x-model="editCardDraft.back" rows="2" class="qz-textarea"></textarea>
+                  </div>
+                </div>
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+                  <div style="display: flex; gap: 10px; flex: 1;">
+                    <input type="text" x-model="editCardDraft.category" placeholder="Category" class="qz-input" style="max-width: 180px;" />
+                    <input type="text" x-model="editCardDraft.mnemonic_or_tip" placeholder="Memory tip (optional)" class="qz-input" />
+                  </div>
+                  <div style="display: flex; gap: 8px;">
+                    <button class="qz-btn" @click="cancelEditingCard()">Cancel</button>
+                    <button class="qz-btn qz-btn-primary" @click="saveEditedCard(card.id)">Save Changes</button>
+                  </div>
+                </div>
+              </div>
+            </template>
           </div>
         </template>
       </div>
@@ -1148,12 +1237,12 @@
         </div>
       </template>
 
-      <!-- Quizlet-Style "Create a New Study Set" Card -->
+      <!-- Quizlet-Style "Create or Edit a Study Set" Card -->
       <div class="qz-card">
         <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 18px;">
           <div>
-            <h2 style="font-size: 22px; font-weight: 800;" x-text="ingestMode === 'append_kit' && hasActiveKit ? `Add Materials to “${kit.title}”` : 'Create a New Study Set'"></h2>
-            <p style="color: var(--text-secondary); font-size: 14px;">Upload lecture slides, PDFs, notes, images, or links to generate flashcards, practice tests, and study guides.</p>
+            <h2 style="font-size: 22px; font-weight: 800;" x-text="ingestMode === 'append_kit' && hasActiveKit ? `Edit Study Set: “${kit.title}”` : 'Create a New Study Set'"></h2>
+            <p style="color: var(--text-secondary); font-size: 14px;" x-text="ingestMode === 'append_kit' && hasActiveKit ? 'Rename this set, change its subject or study goal, manage attached sources, or add new files & links to update all 6 study modes.' : 'Upload lecture slides, PDFs, notes, images, or links to generate flashcards, practice tests, and study guides.'"></p>
           </div>
 
           <template x-if="hasActiveKit">
@@ -1161,18 +1250,28 @@
               <button
                 class="qz-subject-pill"
                 :class="ingestMode === 'new_kit' ? 'is-active' : ''"
-                @click="ingestMode = 'new_kit'"
-              >New Study Set</button>
+                @click="startNewStudySet()"
+              >+ New Study Set</button>
               <button
                 class="qz-subject-pill"
                 :class="ingestMode === 'append_kit' ? 'is-active' : ''"
-                @click="ingestMode = 'append_kit'; ingestSubjectName = kit.subject_area || ''"
-              >Add to Current Set</button>
+                @click="openEditStudySet()"
+              >✎ Edit Current Set</button>
             </div>
           </template>
         </div>
 
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 18px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; margin-bottom: 18px;">
+          <div>
+            <label class="qz-label">Study Set Name (Optional on create)</label>
+            <input
+              type="text"
+              x-model="ingestSetTitle"
+              placeholder="e.g., Sports & Recreation Packet — Midterm 1"
+              class="qz-input"
+            />
+          </div>
+
           <div>
             <label class="qz-label">Subject Folder</label>
             <input
@@ -1190,15 +1289,37 @@
           </div>
 
           <div>
-            <label class="qz-label">Study Goal or Exam Focus (Optional)</label>
+            <label class="qz-label">Study Goal or Exam Focus</label>
             <input
               type="text"
               x-model="customFocus"
-              placeholder="e.g., Midterm 2 review, key derivations & definitions..."
+              placeholder="e.g., Focus on key definitions, dates & exam scenarios..."
               class="qz-input"
             />
           </div>
         </div>
+
+        <!-- Existing Attached Sources (When Editing an Active Set) -->
+        <template x-if="ingestMode === 'append_kit' && hasActiveKit && editableSources.length > 0">
+          <div style="margin-bottom: 18px; padding: 14px 16px; border-radius: 12px; background: var(--bg-subtle); border: 1.5px solid var(--border-subtle);">
+            <div class="qz-label" style="margin-bottom: 8px;">
+              Attached Sources in Set (<span x-text="editableSources.length"></span>) — click ✕ to remove any source
+            </div>
+            <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+              <template x-for="(src, sIdx) in editableSources" :key="sIdx">
+                <span class="qz-badge qz-badge-indigo" style="padding: 6px 12px; font-size: 13px;">
+                  <span x-text="src.source_name || 'Source'"></span>
+                  <span style="opacity: 0.7; font-size: 11px;" x-text="`(${src.source_type || 'File'})`"></span>
+                  <button
+                    style="background:none; border:none; color:inherit; cursor:pointer; font-weight:800; margin-left:6px;"
+                    @click="removeExistingSource(sIdx)"
+                    title="Remove this source from set"
+                  >✕</button>
+                </span>
+              </template>
+            </div>
+          </div>
+        </template>
 
         <!-- Drag & Drop Upload Box -->
         <div
@@ -1209,11 +1330,10 @@
           @drop.prevent="handleFileDrop($event)"
         >
           <input type="file" x-ref="fileInput" multiple style="display: none;" @change="handleFileSelect($event)" />
-          <div style="font-size: 16px; font-weight: 800; color: var(--brand-primary); margin-bottom: 4px;">
-            + Click or drag files here to upload
+          <div style="font-size: 16px; font-weight: 800; color: var(--brand-primary); margin-bottom: 4px;" x-text="ingestMode === 'append_kit' && hasActiveKit ? '+ Click or drag additional files here to add to this set' : '+ Click or drag files here to upload'">
           </div>
           <div style="font-size: 13px; color: var(--text-secondary);">
-            Supports PDF, Word (.docx), PowerPoint (.pptx), Excel/CSV, ZIP, Images, Audio/Video, Jupyter (.ipynb), and Code
+            Supports PDF (up to 2 GB), Word (.docx), PowerPoint (.pptx), Excel/CSV, ZIP, Images, Audio/Video, Jupyter (.ipynb), and Code
           </div>
         </div>
 
@@ -1264,17 +1384,28 @@
           </div>
         </div>
 
-        <div style="display: flex; justify-content: flex-end;">
+        <div style="display: flex; justify-content: flex-end; align-items: center; gap: 12px; flex-wrap: wrap;">
+          <template x-if="ingestMode === 'append_kit' && hasActiveKit">
+            <button
+              class="qz-btn qz-btn-pill"
+              style="padding: 11px 22px; font-size: 14px;"
+              @click="saveStudySetMetadataOnly()"
+              :disabled="isSavingMetadata || isSynthesizing"
+            >
+              <span x-text="isSavingMetadata ? 'Saving...' : 'Save Name / Goal Only'"></span>
+            </button>
+          </template>
+
           <button
             class="qz-btn qz-btn-primary qz-btn-pill"
             style="padding: 12px 28px; font-size: 15px;"
             @click="synthesizeCourse()"
-            :disabled="isSynthesizing"
+            :disabled="isSynthesizing || isSavingMetadata"
           >
             <template x-if="isSynthesizing">
               <span class="qz-spinner" style="width: 16px; height: 16px; border-width: 2px; border-top-color: #fff;"></span>
             </template>
-            <span x-text="isSynthesizing ? (synthesisStepText || 'Building Study Set...') : (ingestMode === 'append_kit' && hasActiveKit ? 'Update Study Set' : 'Create Study Set')"></span>
+            <span x-text="isSynthesizing ? (synthesisStepText || 'Building Study Set...') : (ingestMode === 'append_kit' && hasActiveKit ? 'Update & Regenerate All Modes' : 'Create Study Set')"></span>
           </button>
         </div>
       </div>
