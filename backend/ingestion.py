@@ -80,34 +80,54 @@ class IngestedItem:
         }
 
 
-def extract_pdf_bytes(data: bytes, filename: str) -> IngestedItem:
+def extract_pdf_bytes(data: bytes, filename: str, upload_dir: Path | None = None) -> IngestedItem:
     text_pages = []
+    total_chars = 0
     try:
         reader = PdfReader(io.BytesIO(data))
-        for idx, page in enumerate(reader.pages):
-            page_txt = page.extract_text() or ""
-            if page_txt.strip():
-                text_pages.append(f"--- [Page {idx + 1}] ---\n{page_txt.strip()}")
-        full_text = "\n\n".join(text_pages)
         num_pages = len(reader.pages)
+        for idx, page in enumerate(reader.pages):
+            if idx >= 300 or total_chars >= 120_000:
+                text_pages.append(f"--- [Remaining pages of {num_pages} total omitted for speed] ---")
+                break
+            try:
+                page_txt = page.extract_text() or ""
+            except Exception:
+                page_txt = ""
+            if page_txt.strip():
+                chunk = f"--- [Page {idx + 1}] ---\n{page_txt.strip()}"
+                text_pages.append(chunk)
+                total_chars += len(chunk)
+        full_text = "\n\n".join(text_pages)
     except Exception as e:
-        full_text = f"[PDF text extraction warning for {filename}: {e}]"
+        full_text = f"[PDF text extraction note for {filename}: {e}]"
         num_pages = 0
 
-    # If PDF is scanned or has very little text and is < 20MB, also attach as inline document or save for Files API
     media_part = None
-    if len(full_text.strip()) < 200 and len(data) < 15 * 1024 * 1024:
-        media_part = {
-            "type": "document",
-            "data": base64.b64encode(data).decode("ascii"),
-            "mime_type": "application/pdf",
-        }
+    local_pdf_path = None
+    # If the PDF is scanned/image-heavy (very little selectable text):
+    # - < 15 MB: send inline base64 document
+    # - >= 15 MB: save to disk and upload via Files API (supports up to 2 GB)
+    if len(full_text.strip()) < 300:
+        if len(data) < 15 * 1024 * 1024:
+            media_part = {
+                "type": "document",
+                "data": base64.b64encode(data).decode("ascii"),
+                "mime_type": "application/pdf",
+            }
+        elif upload_dir is not None:
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            safe_name = re.sub(r"[^a-zA-Z0-9._-]", "_", filename)
+            saved_path = upload_dir / f"large_pdf_{safe_name}"
+            saved_path.write_bytes(data)
+            local_pdf_path = str(saved_path)
 
     return IngestedItem(
         source_name=filename,
         source_type="PDF Document",
         extracted_text=full_text,
         media_part=media_part,
+        local_file_path=local_pdf_path,
         mime_type="application/pdf",
         metadata={"pages": num_pages, "size_bytes": len(data)},
     )
@@ -262,7 +282,7 @@ def extract_single_file_bytes(data: bytes, filename: str, upload_dir: Path) -> L
                     # Skip macOS resource forks or hidden git/node_modules
                     if "__MACOSX" in inner_name or "/." in inner_name or inner_name.startswith("."):
                         continue
-                    if info.file_size > 40 * 1024 * 1024:
+                    if info.file_size > 500 * 1024 * 1024:
                         continue
                     inner_bytes = zf.read(info.filename)
                     display_name = f"{filename} -> {inner_name}"
@@ -278,7 +298,7 @@ def extract_single_file_bytes(data: bytes, filename: str, upload_dir: Path) -> L
         return items
 
     if ext == ".pdf":
-        return [extract_pdf_bytes(data, filename)]
+        return [extract_pdf_bytes(data, filename, upload_dir)]
     if ext == ".docx":
         return [extract_docx_bytes(data, filename)]
     if ext == ".pptx":

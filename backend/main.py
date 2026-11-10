@@ -55,7 +55,7 @@ app.add_middleware(
     allow_headers=["Content-Type", "Authorization"],
 )
 
-MAX_UPLOAD_FILE_BYTES = 50 * 1024 * 1024  # 50 MB per file guard
+MAX_UPLOAD_FILE_BYTES = 2 * 1024 * 1024 * 1024  # 2 GB per file limit for large textbooks & videos
 SAFE_KIT_ID_RE = re.compile(r"^kit_[a-zA-Z0-9_-]{4,40}$")
 
 
@@ -425,7 +425,7 @@ async def ingest_and_synthesize(
         if len(raw_bytes) > MAX_UPLOAD_FILE_BYTES:
             raise HTTPException(
                 status_code=413,
-                detail=f"File '{up_file.filename}' exceeds the 50 MB per-file security limit.",
+                detail=f"File '{up_file.filename}' exceeds the 2 GB per-file limit.",
             )
 
         # Save raw uploaded file and sync to GCS uploads/ folder if enabled
