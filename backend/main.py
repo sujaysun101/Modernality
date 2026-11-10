@@ -27,6 +27,18 @@ from backend.postgres_db import PostgresStudyDatabase
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+ENV_FILE = BASE_DIR / ".env"
+if ENV_FILE.exists():
+    for raw_line in ENV_FILE.read_text(encoding="utf-8", errors="ignore").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        k, v = line.split("=", 1)
+        k = k.strip()
+        v = v.strip().strip('"').strip("'")
+        if k and v and k not in os.environ:
+            os.environ[k] = v
+
 DATA_DIR = BASE_DIR / "data"
 UPLOAD_DIR = DATA_DIR / "uploads"
 MEDIA_DIR = DATA_DIR / "media"
@@ -209,9 +221,12 @@ class GuidedStepRequest(BaseModel):
 @app.get("/api/health")
 async def health_check() -> Dict[str, Any]:
     """Cloud Run readiness and liveness probe endpoint."""
+    db_status = pg_db.get_status()
     return {
         "status": "healthy",
-        "service": os.environ.get("K_SERVICE", "lumina-tutor-local"),
+        "service": os.environ.get("K_SERVICE", "modernality-local"),
+        "database_backend": db_status.get("backend", "PostgreSQL"),
+        "postgres_active": db_status.get("postgres_active", False),
         "firestore_active": gcp_backend.firestore_active,
         "gcs_active": gcp_backend.gcs_active,
     }
@@ -224,6 +239,7 @@ async def get_status() -> Dict[str, Any]:
         "elevenlabs_configured": gemini_service.has_elevenlabs_key(),
         "elevenlabs_voice_id": gemini_service.get_elevenlabs_voice_id(),
         "kit_count": len(STUDY_KITS),
+        "database": pg_db.get_status(),
         "gcp": gcp_backend.get_cloud_status(),
     }
 

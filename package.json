@@ -1,0 +1,17 @@
+{
+  "name": "modernality",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Modernality — Interactive AI Study Sets, Flashcards, Problem Solver & Live Voice Whiteboard",
+  "type": "module",
+  "scripts": {
+    "lint": "node scripts/lint.mjs",
+    "typecheck": "node scripts/typecheck.mjs",
+    "test": "node scripts/test.mjs",
+    "chrome:debug": "node scripts/chrome-debug.mjs",
+    "verify": "pnpm run lint && pnpm run typecheck && pnpm run test"
+  },
+  "devDependencies": {
+    "typescript": "^5.8.2"
+  }
+}

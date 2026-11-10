@@ -22,7 +22,9 @@ data/
 *.db
 *.sqlite3
 
-# OS / Editor files
+# OS / Editor / Browser Debug files
 .DS_Store
 Thumbs.db
 *.log
+node_modules/
+.chrome-debug-profile/

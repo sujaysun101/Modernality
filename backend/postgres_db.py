@@ -76,6 +76,14 @@ class PostgresStudyDatabase:
 
         self._initialize_postgres()
 
+    def get_status(self) -> Dict[str, Any]:
+        return {
+            "backend": "PostgreSQL (Active)" if self.pg_active else "PostgreSQL (Write-Through Local Mirror)",
+            "postgres_active": self.pg_active,
+            "user_id": self.user_id,
+            "last_error": self.last_pg_error,
+        }
+
     def _get_connection(self) -> psycopg.Connection:
         return psycopg.connect(
             self.database_url,
