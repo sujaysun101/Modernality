@@ -23,6 +23,7 @@ from pydantic import BaseModel
 from backend.gcp_storage import GoogleCloudBackend
 from backend.gemini_service import LIVE_VOICE_MODEL, GeminiTutorService
 from backend.ingestion import IngestedItem, extract_single_file_bytes, ingest_web_url
+from backend.postgres_db import PostgresStudyDatabase
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -48,6 +49,7 @@ ALLOWED_ORIGINS = [
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"https://.*\.run\.app",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "Authorization"],
@@ -76,6 +78,10 @@ async def security_and_cache_headers(request: Request, call_next):
         response.headers["Expires"] = "0"
     return response
 
+pg_db = PostgresStudyDatabase(
+    local_kits_dir=KITS_DIR,
+    data_dir=DATA_DIR,
+)
 gcp_backend = GoogleCloudBackend(
     local_kits_dir=KITS_DIR,
     local_media_dir=MEDIA_DIR,
@@ -94,18 +100,18 @@ if not gemini_service.has_elevenlabs_key():
     if el_secret_key:
         gemini_service.set_elevenlabs_key(el_secret_key)
 
-# In-memory registry synced with Cloud Firestore + Local Disk
+# In-memory registry backed by Standalone PostgreSQL + Local Write-Through Cache
 STUDY_KITS: Dict[str, Dict[str, Any]] = {}
 
 
 def reload_all_kits() -> None:
     global STUDY_KITS
-    STUDY_KITS = gcp_backend.load_all_study_kits()
+    STUDY_KITS = pg_db.load_all_study_kits()
 
 
 def persist_kit(kit_record: Dict[str, Any]) -> None:
     kit_id = kit_record["id"]
-    saved = gcp_backend.save_study_kit(kit_record)
+    saved = pg_db.save_study_kit(kit_record)
     STUDY_KITS[kit_id] = saved
 
 
@@ -163,6 +169,22 @@ class TutorChatRequest(BaseModel):
 class UpdateKitSubjectRequest(BaseModel):
     subject_area: str
     title: Optional[str] = None
+
+
+class SubjectCreateRequest(BaseModel):
+    name: str
+
+
+class CardProgressRequest(BaseModel):
+    card_ratings: Dict[str, str]
+
+
+class RecentProblemRequest(BaseModel):
+    id: Optional[str] = None
+    label: str
+    text: str = ""
+    image: Optional[str] = None
+    timestamp: Optional[str] = None
 
 
 class InteractiveSolveRequest(BaseModel):
@@ -320,8 +342,44 @@ async def delete_kit_endpoint(kit_id: str) -> Dict[str, Any]:
     safe_id = validate_safe_kit_id(kit_id)
     if safe_id in STUDY_KITS:
         del STUDY_KITS[safe_id]
-    await asyncio.to_thread(gcp_backend.delete_study_kit, safe_id)
+    await asyncio.to_thread(pg_db.delete_study_kit, safe_id)
     return {"status": "deleted", "id": safe_id}
+
+
+@app.patch("/api/kits/{kit_id}/progress")
+async def update_kit_progress_endpoint(kit_id: str, req: CardProgressRequest) -> Dict[str, Any]:
+    """Saves the user's Flashcard 'Know' vs 'Still learning' ratings in PostgreSQL + local write-through store."""
+    safe_id = validate_safe_kit_id(kit_id)
+    if safe_id not in STUDY_KITS:
+        raise HTTPException(status_code=404, detail=f"Study kit '{safe_id}' not found.")
+    rec = STUDY_KITS[safe_id]
+    rec["card_ratings"] = req.card_ratings or {}
+    await asyncio.to_thread(persist_kit, rec)
+    return {"status": "saved", "id": safe_id, "card_ratings": rec["card_ratings"]}
+
+
+@app.get("/api/subjects")
+async def list_subjects_endpoint() -> Dict[str, Any]:
+    subjects = await asyncio.to_thread(pg_db.list_subjects)
+    return {"subjects": subjects}
+
+
+@app.post("/api/subjects")
+async def create_subject_endpoint(req: SubjectCreateRequest) -> Dict[str, Any]:
+    subjects = await asyncio.to_thread(pg_db.add_subject, req.name)
+    return {"subjects": subjects}
+
+
+@app.get("/api/interactive/recent")
+async def list_recent_problems_endpoint() -> Dict[str, Any]:
+    problems = await asyncio.to_thread(pg_db.list_recent_problems)
+    return {"problems": problems}
+
+
+@app.post("/api/interactive/recent")
+async def save_recent_problem_endpoint(req: RecentProblemRequest) -> Dict[str, Any]:
+    problems = await asyncio.to_thread(pg_db.save_recent_problem, req.model_dump())
+    return {"problems": problems}
 
 
 @app.patch("/api/kits/{kit_id}/subject")

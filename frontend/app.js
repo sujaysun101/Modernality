@@ -192,7 +192,11 @@ document.addEventListener('alpine:init', () => {
     async init() {
       document.documentElement.setAttribute('data-theme', this.theme);
       await this.checkStatus();
-      await this.fetchKitsList();
+      await Promise.all([
+        this.fetchKitsList(),
+        this.fetchSubjectsList(),
+        this.fetchRecentProblems(),
+      ]);
       if (this.kitsList.length > 0) {
         this.currentKitId = this.kitsList[0].id;
         await this.loadStudyKit(this.currentKitId);
@@ -359,7 +363,33 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
-    createSubjectFolder() {
+    async fetchSubjectsList() {
+      try {
+        const res = await fetch('/api/subjects');
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.subjects)) {
+            const merged = Array.from(new Set([...this.customSubjects, ...data.subjects]));
+            this.customSubjects = merged;
+            localStorage.setItem('modernality_subjects', JSON.stringify(merged));
+          }
+        }
+      } catch (_) {}
+    },
+
+    async fetchRecentProblems() {
+      try {
+        const res = await fetch('/api/interactive/recent');
+        if (res.ok) {
+          const data = await res.json();
+          if (Array.isArray(data.problems) && data.problems.length > 0) {
+            this.wbRecentProblems = data.problems;
+          }
+        }
+      } catch (_) {}
+    },
+
+    async createSubjectFolder() {
       const name = this.newSubjectDraft.trim();
       if (!name) return;
       if (!this.customSubjects.includes(name)) {
@@ -369,6 +399,13 @@ document.addEventListener('alpine:init', () => {
       this.newSubjectDraft = '';
       this.showNewSubjectInput = false;
       this.selectSubjectFilter(name);
+      try {
+        await fetch('/api/subjects', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name }),
+        });
+      } catch (_) {}
     },
 
     selectSubjectFilter(subj) {
@@ -549,6 +586,7 @@ document.addEventListener('alpine:init', () => {
         this.activeProblemIndex = 0;
         this.currentCardIndex = 0;
         this.isCardFlipped = false;
+        this.cardRatings = data.card_ratings || {};
         this.resetProblemView();
 
         // Hydrate saved slide media (TTS audio & Omni Flash video URLs)
@@ -960,7 +998,14 @@ document.addEventListener('alpine:init', () => {
     rateCurrentCard(rating) {
       const card = this.currentFlashcard;
       if (!card) return;
-      this.cardRatings[card.id] = rating;
+      this.cardRatings = { ...this.cardRatings, [card.id]: rating };
+      if (this.currentKitId) {
+        fetch(`/api/kits/${this.currentKitId}/progress`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ card_ratings: this.cardRatings }),
+        }).catch(() => {});
+      }
       this.isCardFlipped = false;
       setTimeout(() => {
         if (this.currentCardIndex < (this.kit.flashcards?.length || 1) - 1) {
@@ -1621,6 +1666,11 @@ document.addEventListener('alpine:init', () => {
       ];
       try {
         localStorage.setItem('modernality_recent_problems', JSON.stringify(this.wbRecentProblems.slice(0, 5)));
+        fetch('/api/interactive/recent', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(this.wbRecentProblems[0]),
+        }).catch(() => {});
       } catch (_) {}
 
       this.wbIsAnalyzing = true;

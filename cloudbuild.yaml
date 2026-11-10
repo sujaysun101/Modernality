@@ -4,10 +4,10 @@
 # with Cloud Firestore, Cloud Storage, and Secret Manager bindings.
 # ============================================================================
 substitutions:
-  _SERVICE_NAME: lumina-tutor
+  _SERVICE_NAME: modernality
   _REGION: us-east4
-  _AR_REPO: lumina-repo
-  _GCS_BUCKET: ${PROJECT_ID}-lumina-media
+  _AR_REPO: modernality-repo
+  _GCS_BUCKET: ${PROJECT_ID}-modernality-media
   _FIRESTORE_DB: "(default)"
 
 steps:
