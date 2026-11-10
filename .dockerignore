@@ -1,9 +1,12 @@
+.git
+.gitignore
 .venv/
+venv/
+node_modules/
+.chrome-debug-profile/
 __pycache__/
 *.pyc
-.git/
+data/uploads/
+data/media/
 .env
-data/uploads/*
-data/media/*
-data/kits/*
-*.log
+.env.*
