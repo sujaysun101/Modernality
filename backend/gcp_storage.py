@@ -131,6 +131,28 @@ class GoogleCloudBackend:
             logger.debug(f"Secret Manager lookup skipped: {e}")
         return None
 
+    def fetch_secret_elevenlabs_key(self) -> Optional[str]:
+        """Attempts to load ELEVENLABS_API_KEY from Google Cloud Secret Manager."""
+        if not self.project_id:
+            return None
+        try:
+            from google.cloud import secretmanager
+
+            client = secretmanager.SecretManagerServiceClient()
+            for candidate_secret in ("ELEVENLABS_API_KEY", "elevenlabs-api-key", "XI_API_KEY"):
+                try:
+                    name = f"projects/{self.project_id}/secrets/{candidate_secret}/versions/latest"
+                    response = client.access_secret_version(request={"name": name})
+                    secret_val = response.payload.data.decode("UTF-8").strip()
+                    if secret_val:
+                        os.environ["ELEVENLABS_API_KEY"] = secret_val
+                        return secret_val
+                except Exception:
+                    continue
+        except Exception as e:
+            logger.debug(f"ElevenLabs Secret Manager lookup skipped: {e}")
+        return None
+
     def get_cloud_status(self) -> Dict[str, Any]:
         is_cloud_run = bool(os.environ.get("K_SERVICE"))
         return {

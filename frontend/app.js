@@ -22,8 +22,9 @@ document.addEventListener('alpine:init', () => {
 
   Alpine.data('luminaStudio', () => ({
     // Navigation & Global State
-    activeTab: 'ingest', // 'ingest' | 'explainer' | 'lessons' | 'tutorials' | 'practice' | 'flashcards' | 'graph' | 'tutor' | 'cloud'
-    theme: localStorage.getItem('modernality_theme') || 'dark',
+    activeTab: 'ingest', // 'ingest' | 'flashcards' | 'lessons' | 'practice' | 'explainer' | 'tutor' | 'workbench'
+    theme: localStorage.getItem('modernality_qz_theme') || 'light',
+    searchQuery: '',
     apiKeyConfigured: false,
     elevenlabsConfigured: false,
     showApiKeyModal: false,
@@ -195,7 +196,7 @@ document.addEventListener('alpine:init', () => {
       if (this.kitsList.length > 0) {
         this.currentKitId = this.kitsList[0].id;
         await this.loadStudyKit(this.currentKitId);
-        this.activeTab = 'explainer';
+        this.activeTab = 'flashcards';
       } else {
         this.currentKitId = '';
         this.currentKitRecord = null;
@@ -203,7 +204,7 @@ document.addEventListener('alpine:init', () => {
         this.chatMessages = [
           {
             role: 'assistant',
-            content: 'Welcome to **Modernality**! Upload your study materials in **Ingest Materials** to synthesize a full course, or ask me any question directly right here.',
+            content: 'Welcome to **Modernality**! Create a Study Set from your materials or ask me any question right here.',
           },
         ];
       }
@@ -279,6 +280,22 @@ document.addEventListener('alpine:init', () => {
       return Object.values(this.cardRatings).filter((r) => r === 'good' || r === 'easy').length;
     },
 
+    get stillLearningCount() {
+      return Object.values(this.cardRatings).filter((r) => r === 'again' || r === 'hard').length;
+    },
+
+    get filteredFlashcards() {
+      const cards = this.kit.flashcards || [];
+      const q = (this.searchQuery || '').trim().toLowerCase();
+      if (!q) return cards;
+      return cards.filter(
+        (c) =>
+          (c.front || '').toLowerCase().includes(q) ||
+          (c.back || '').toLowerCase().includes(q) ||
+          (c.category || '').toLowerCase().includes(q)
+      );
+    },
+
     get allSubjects() {
       const set = new Set(this.customSubjects);
       for (const k of this.kitsList) {
@@ -290,12 +307,56 @@ document.addEventListener('alpine:init', () => {
     },
 
     get filteredKitsList() {
-      if (this.selectedSubjectFilter === 'ALL') {
-        return this.kitsList;
+      let list = this.kitsList;
+      if (this.selectedSubjectFilter !== 'ALL') {
+        list = list.filter(
+          (k) => (k.subject_area || '').toLowerCase() === this.selectedSubjectFilter.toLowerCase()
+        );
       }
-      return this.kitsList.filter(
-        (k) => (k.subject_area || '').toLowerCase() === this.selectedSubjectFilter.toLowerCase()
+      const q = (this.searchQuery || '').trim().toLowerCase();
+      if (!q) return list;
+      return list.filter(
+        (k) =>
+          (k.title || '').toLowerCase().includes(q) ||
+          (k.subject_area || '').toLowerCase().includes(q)
       );
+    },
+
+    handleGlobalSpaceFlip(event) {
+      if (this.activeTab !== 'flashcards' || !this.hasActiveKit) return;
+      const tag = (event.target?.tagName || '').toLowerCase();
+      if (tag === 'input' || tag === 'textarea' || tag === 'select' || tag === 'button') return;
+      event.preventDefault();
+      this.isCardFlipped = !this.isCardFlipped;
+    },
+
+    async speakTextAloud(rawText) {
+      const clean = (rawText || '').replace(/[$*`#_~]/g, '').trim();
+      if (!clean) return;
+      if (this.elevenlabsConfigured) {
+        try {
+          const res = await fetch('/api/tts/elevenlabs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: clean, voice_id: this.elevenlabsVoice || 'Rachel' }),
+          });
+          if (res.ok) {
+            const data = await res.json();
+            if (data.audio_base64) {
+              const audio = new Audio(`data:audio/mpeg;base64,${data.audio_base64}`);
+              await audio.play();
+              return;
+            }
+          }
+        } catch (err) {
+          console.warn('ElevenLabs card readout fallback:', err);
+        }
+      }
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel();
+        const utter = new SpeechSynthesisUtterance(clean);
+        window.speechSynthesis.speak(utter);
+      }
     },
 
     createSubjectFolder() {
@@ -332,7 +393,7 @@ document.addEventListener('alpine:init', () => {
 
     toggleTheme() {
       this.theme = this.theme === 'dark' ? 'light' : 'dark';
-      localStorage.setItem('modernality_theme', this.theme);
+      localStorage.setItem('modernality_qz_theme', this.theme);
       document.documentElement.setAttribute('data-theme', this.theme);
       if (this.activeTab === 'graph' && this.hasActiveKit) {
         this.$nextTick(() => this.initConceptGraphCanvas());
@@ -536,6 +597,10 @@ document.addEventListener('alpine:init', () => {
       this.selectedFiles.splice(idx, 1);
     },
 
+    removeFile(idx) {
+      this.selectedFiles.splice(idx, 1);
+    },
+
     addUrlToList() {
       const trimmed = this.urlInput.trim();
       if (!trimmed) return;
@@ -545,7 +610,15 @@ document.addEventListener('alpine:init', () => {
       this.urlInput = '';
     },
 
+    addUrl() {
+      this.addUrlToList();
+    },
+
     removeUrlFromList(idx) {
+      this.addedUrls.splice(idx, 1);
+    },
+
+    removeUrl(idx) {
       this.addedUrls.splice(idx, 1);
     },
 
@@ -557,17 +630,13 @@ document.addEventListener('alpine:init', () => {
     },
 
     async synthesizeCourse() {
-      if (!this.apiKeyConfigured) {
-        this.showApiKeyModal = true;
-        return;
-      }
       if (
         this.selectedFiles.length === 0 &&
         this.addedUrls.length === 0 &&
         !this.urlInput.trim() &&
         !this.rawNotes.trim()
       ) {
-        this.errorBanner = 'Please add at least one file (PDF, DOCX, ZIP, image, etc.), link (YouTube/Drive/Web), or study notes.';
+        this.errorBanner = 'Please add at least one file, link, or study notes.';
         return;
       }
 
@@ -577,7 +646,7 @@ document.addEventListener('alpine:init', () => {
 
       this.errorBanner = '';
       this.isSynthesizing = true;
-      this.synthesisStepText = 'Unpacking & extracting multimodal sources (PDFs, DOCX, ZIPs, YouTube transcripts, Drive)...';
+      this.synthesisStepText = 'Extracting sources & building flashcards, tests, and study guide...';
 
       const formData = new FormData();
       for (const file of this.selectedFiles) {
@@ -595,7 +664,7 @@ document.addEventListener('alpine:init', () => {
       const stepTimer = setTimeout(() => {
         if (this.isSynthesizing) {
           this.synthesisStepText =
-            'Synthesizing Explainer Slides, Lesson Modules, Practice Problems & Concept Graph...';
+            'Generating flashcards, practice test questions, and study modules...';
         }
       }, 3200);
 
@@ -606,17 +675,16 @@ document.addEventListener('alpine:init', () => {
         });
         if (!res.ok) {
           const err = await res.json();
-          throw new Error(err.detail || 'Synthesis failed');
+          throw new Error(err.detail || 'Study set synthesis failed');
         }
         const newKitRecord = await res.json();
         await this.fetchKitsList();
         await this.loadStudyKit(newKitRecord.id);
 
-        // Clear ingestion form and switch to Explainer Video Player
         this.selectedFiles = [];
         this.addedUrls = [];
         this.rawNotes = '';
-        this.activeTab = 'explainer';
+        this.activeTab = 'flashcards';
       } catch (err) {
         this.errorBanner = err.message;
       } finally {
@@ -831,6 +899,16 @@ document.addEventListener('alpine:init', () => {
       this.$nextTick(() => this.typesetMath());
     },
 
+    get currentGradingResult() {
+      const prob = this.currentProblem;
+      if (!prob) return null;
+      return this.gradingResultsByProblem[prob.id] || null;
+    },
+
+    async submitPracticeAnswer() {
+      await this.submitAnswerForAiGrading();
+    },
+
     async submitAnswerForAiGrading() {
       const prob = this.currentProblem;
       if (!prob) return;
@@ -840,10 +918,6 @@ document.addEventListener('alpine:init', () => {
           : this.freeResponseDraft.trim();
 
       if (!answerText) return;
-      if (!this.apiKeyConfigured) {
-        this.showApiKeyModal = true;
-        return;
-      }
 
       this.isGrading = true;
       this.errorBanner = '';
@@ -877,6 +951,10 @@ document.addEventListener('alpine:init', () => {
     flipCard() {
       this.isCardFlipped = !this.isCardFlipped;
       this.$nextTick(() => this.typesetMath());
+    },
+
+    rateFlashcard(rating) {
+      this.rateCurrentCard(rating);
     },
 
     rateCurrentCard(rating) {
@@ -1101,10 +1179,6 @@ document.addEventListener('alpine:init', () => {
     async sendTutorChatMessage(quickPrompt = null) {
       const text = (quickPrompt || this.chatInput).trim();
       if (!text && !this.chatImageAttachment) return;
-      if (!this.apiKeyConfigured) {
-        this.showApiKeyModal = true;
-        return;
-      }
 
       const attachedImg = this.chatImageAttachment;
       this.chatMessages.push({
@@ -1528,10 +1602,6 @@ document.addEventListener('alpine:init', () => {
 
     async runWorkbenchMode(targetMode) {
       const mode = targetMode || this.wbMode;
-      if (!this.apiKeyConfigured) {
-        this.showApiKeyModal = true;
-        return;
-      }
       if (!this.wbProblemText.trim() && !this.wbProblemImage) {
         this.errorBanner = 'Capture a screen problem, upload/paste an image, or enter a problem statement first.';
         return;

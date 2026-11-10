@@ -1,10 +1,10 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Modernality</title>
-  <link rel="icon" type="image/png" href="/static/logo.png?v=20261109_v10" />
+  <title>Modernality — Flashcards, Study Sets & Interactive Problem Solver</title>
+  <link rel="icon" type="image/png" href="/static/logo.png?v=20261110_qz1" />
 
   <!-- Typography -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -19,1652 +19,1269 @@
   <!-- Marked.js for Markdown Rendering -->
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
-  <!-- Mermaid.js for Architecture & Flow Diagrams -->
+  <!-- Mermaid.js for Diagrams -->
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
 
-  <!-- Critical Inline Layout & SVG Safeguard (Prevents FOUC or Cache Mismatch) -->
+  <!-- Critical Inline Safeguards -->
   <style>
     [x-cloak] { display: none !important; }
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    svg { flex-shrink: 0; max-width: 100%; display: inline-block; vertical-align: middle; }
-    .nav-icon { width: 16px; height: 16px; }
-    .app-shell { display: flex; flex-direction: column; height: 100vh; width: 100vw; overflow: hidden; }
-    .app-body { display: flex; flex: 1; min-height: 0; overflow: hidden; }
+    svg { flex-shrink: 0; display: inline-block; vertical-align: middle; }
   </style>
 
-  <!-- Design System Stylesheet (Cache-Busted) -->
-  <link rel="stylesheet" href="/static/styles.css?v=20261109_v11" />
+  <!-- Quizlet-Inspired Design System Stylesheet -->
+  <link rel="stylesheet" href="/static/styles.css?v=20261110_qz1" />
 
-  <!-- Application Controller + Alpine.js (Cache-Busted) -->
-  <script defer src="/static/app.js?v=20261109_v11"></script>
+  <!-- Application Controller + Alpine.js -->
+  <script defer src="/static/app.js?v=20261110_qz1"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.3/dist/cdn.min.js"></script>
 </head>
 
-<body x-data="luminaStudio">
-  <div class="app-shell">
+<body x-data="luminaStudio" @keydown.window.space="handleGlobalSpaceFlip($event)">
 
-    <!-- ==================================================================
-         1. TOPBAR NAVIGATION
-         ================================================================== -->
-    <header class="app-topbar">
-      <!-- Left: Brand Identity -->
-      <div class="brand-cluster" style="cursor: pointer;" @click="activeTab = 'ingest'">
-        <img
-          src="/static/logo.png?v=20261109_v9"
-          alt="Modernality"
-          width="34"
-          height="34"
-          style="width: 34px; height: 34px; border-radius: 8px; object-fit: cover; border: 1px solid rgba(255,255,255,0.14); box-shadow: 0 2px 10px rgba(0,0,0,0.45);"
-        />
-        <div class="brand-title-row">
-          <span class="brand-name">Modernality</span>
-        </div>
+  <!-- ====================================================================
+       1. QUIZLET TOP NAVIGATION BAR (Zero Backend/API Clutter)
+       ==================================================================== -->
+  <header class="qz-navbar">
+    <div class="qz-nav-left">
+      <div class="qz-brand" @click="activeTab = hasActiveKit ? 'flashcards' : 'ingest'">
+        <img src="/static/logo.png?v=20261110_qz1" alt="Modernality" class="qz-brand-logo" />
+        <span class="qz-brand-name">Modernality</span>
       </div>
 
-      <!-- Right: Active Controls -->
-      <div class="topbar-actions">
-        <!-- Active Study Kit Selector (Visible when user has created courses) -->
-        <template x-if="kitsList.length > 0">
-          <div style="display: flex; align-items: center; gap: 6px;">
-            <select
-              x-model="currentKitId"
-              @change="loadStudyKit(currentKitId)"
-              class="select-field"
-              style="width: auto; max-width: 260px; padding: 6px 10px; font-size: 12.5px; font-weight: 600;"
-            >
-              <template x-for="k in kitsList" :key="k.id">
-                <option :value="k.id" x-text="k.title"></option>
-              </template>
-            </select>
-          </div>
+      <nav class="qz-nav-links">
+        <button
+          class="qz-nav-tab"
+          :class="activeTab === 'ingest' ? 'is-active' : ''"
+          @click="activeTab = 'ingest'"
+        >
+          Your Library
+        </button>
+
+        <template x-if="hasActiveKit">
+          <button
+            class="qz-nav-tab"
+            :class="['flashcards', 'lessons', 'practice', 'explainer', 'tutor', 'graph'].includes(activeTab) ? 'is-active' : ''"
+            @click="activeTab = 'flashcards'"
+          >
+            Study Set
+          </button>
         </template>
 
-        <!-- Theme Switcher (Dark / Light Studio) -->
         <button
-          class="btn"
-          @click="toggleTheme()"
-          title="Toggle Dark / Light Studio Theme"
+          class="qz-nav-tab"
+          :class="activeTab === 'workbench' ? 'is-active' : ''"
+          @click="activeTab = 'workbench'; $nextTick(() => { if (wbMode === 'learning') initWhiteboardCanvas(); })"
         >
-          <template x-if="theme === 'dark'">
-            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z"/>
-            </svg>
-          </template>
-          <template x-if="theme === 'light'">
-            <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z"/>
-            </svg>
-          </template>
-          <span x-text="theme === 'dark' ? 'Light' : 'Dark'"></span>
+          Problem Solver &amp; Whiteboard
         </button>
+      </nav>
+    </div>
 
-        <!-- Studio Settings -->
-        <button
-          class="btn"
-          @click="showApiKeyModal = true"
-          title="Studio Settings"
-        >
-          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M9.594 3.94c.09-.542.56-.94 1.11-.94h2.593c.55 0 1.02.398 1.11.94l.213 1.281c.063.374.313.686.645.87.074.04.147.083.22.127.324.196.72.257 1.075.124l1.217-.456a1.125 1.125 0 011.37.49l1.296 2.247a1.125 1.125 0 01-.26 1.431l-1.003.827c-.293.24-.438.613-.431.992a6.759 6.759 0 010 .255c-.007.378.138.75.43.99l1.005.828c.424.35.534.954.26 1.43l-1.298 2.247a1.125 1.125 0 01-1.369.491l-1.217-.456c-.355-.133-.75-.072-1.076.124a6.57 6.57 0 01-.22.128c-.331.183-.581.495-.644.869l-.213 1.28c-.09.543-.56.941-1.11.941h-2.594c-.55 0-1.02-.398-1.11-.94l-.213-1.281c-.062-.374-.312-.686-.644-.87a6.52 6.52 0 01-.22-.127c-.325-.196-.72-.257-1.076-.124l-1.217.456a1.125 1.125 0 01-1.369-.49l-1.297-2.247a1.125 1.125 0 01.26-1.431l1.004-.827c.292-.24.437-.613.43-.992a6.932 6.932 0 010-.255c.007-.378-.138-.75-.43-.99l-1.004-.828a1.125 1.125 0 01-.26-1.43l1.297-2.247a1.125 1.125 0 011.37-.491l1.216.456c.356.133.751.072 1.076-.124.072-.044.146-.087.22-.128.332-.183.582-.495.644-.869l.214-1.281z"/>
-            <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+    <!-- Center: Quizlet Pill Search Bar -->
+    <div class="qz-search-wrap">
+      <svg class="qz-search-icon" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+        <circle cx="11" cy="11" r="8"/><path stroke-linecap="round" d="m21 21-4.3-4.3"/>
+      </svg>
+      <input
+        type="text"
+        x-model="searchQuery"
+        placeholder="Search study sets, subjects, or flashcards..."
+        class="qz-search-input"
+      />
+    </div>
+
+    <!-- Right: Create Button & Daylight/Night Toggle -->
+    <div class="qz-nav-right">
+      <button
+        class="qz-btn qz-btn-primary qz-btn-pill"
+        @click="activeTab = 'ingest'; ingestMode = 'new_kit'"
+        title="Create a new study set"
+      >
+        <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.5" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+        </svg>
+        <span>Create</span>
+      </button>
+
+      <button
+        class="qz-btn qz-btn-icon"
+        @click="toggleTheme()"
+        :title="theme === 'dark' ? 'Switch to Daylight Mode' : 'Switch to Night Mode'"
+      >
+        <template x-if="theme === 'dark'">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <circle cx="12" cy="12" r="4"/><path stroke-linecap="round" d="M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32 1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/>
           </svg>
-          <span>Settings</span>
-        </button>
-      </div>
-    </header>
+        </template>
+        <template x-if="theme !== 'dark'">
+          <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+        </template>
+      </button>
+    </div>
+  </header>
 
-    <!-- Error / Notice Banner -->
+  <!-- ====================================================================
+       2. MAIN CENTERED QUIZLET CONTAINER
+       ==================================================================== -->
+  <main class="qz-container">
+
+    <!-- Error / Status Notice -->
     <div
       x-show="errorBanner"
       x-cloak
-      style="background: var(--danger-soft); border-bottom: 1px solid var(--danger-border); padding: 9px 20px; display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; color: var(--danger-text);"
+      style="margin-bottom: 20px; padding: 14px 18px; border-radius: 12px; background: var(--learning-coral-soft); border: 1.5px solid var(--learning-coral); color: var(--learning-coral); display: flex; align-items: center; justify-content: space-between; gap: 12px; font-weight: 600; font-size: 14px;"
     >
-      <div style="display: flex; align-items: center; gap: 8px;">
-        <strong>Notice:</strong>
-        <span x-text="errorBanner"></span>
-      </div>
-      <button class="btn btn-rose" style="padding: 3px 9px; font-size: 11px;" @click="errorBanner = ''">Dismiss</button>
+      <span x-text="errorBanner"></span>
+      <button style="background:none; border:none; color:inherit; cursor:pointer; font-weight:800;" @click="errorBanner = ''">✕</button>
     </div>
 
     <!-- ==================================================================
-         2. MAIN APPLICATION BODY (LEFT SIDEBAR + STAGE)
+         STUDY SET HEADER + ICONIC QUIZLET STUDY MODE TILES
+         (Shown whenever viewing an active Study Set)
          ================================================================== -->
-    <div class="app-body">
-
-      <!-- LEFT NAVIGATION RAIL -->
-      <aside class="app-sidebar">
-        <div>
-          <!-- Primary Action CTA -->
-          <button class="sidebar-cta" @click="activeTab = 'ingest'">
-            <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.3" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
-            </svg>
-            <span>New Study Kit / Ingest</span>
-          </button>
-
-          <!-- Group 1: Course Synthesis & Learning -->
-          <div class="nav-group">
-            <div class="nav-group-label">Course Modules</div>
-            <div class="nav-list">
-              <button
-                class="nav-item"
-                :class="activeTab === 'explainer' ? 'is-active' : ''"
-                @click="activeTab = 'explainer'"
-              >
-                <div class="nav-item-left">
-                  <svg class="nav-icon" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z"/>
-                  </svg>
-                  <span>Breakdown Videos</span>
-                </div>
-                <span x-show="(kit.explainer_slides?.length || 0) > 0" class="nav-counter" x-text="kit.explainer_slides?.length"></span>
-              </button>
-
-              <button
-                class="nav-item"
-                :class="activeTab === 'lessons' ? 'is-active' : ''"
-                @click="activeTab = 'lessons'"
-              >
-                <div class="nav-item-left">
-                  <svg class="nav-icon" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"/>
-                  </svg>
-                  <span>Lesson Plans</span>
-                </div>
-                <span x-show="(kit.lesson_modules?.length || 0) > 0" class="nav-counter" x-text="kit.lesson_modules?.length"></span>
-              </button>
-
-              <button
-                class="nav-item"
-                :class="activeTab === 'tutorials' ? 'is-active' : ''"
-                @click="activeTab = 'tutorials'"
-              >
-                <div class="nav-item-left">
-                  <svg class="nav-icon" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                  </svg>
-                  <span>Guided Tutorials</span>
-                </div>
-                <span x-show="(kit.guided_tutorial_steps?.length || 0) > 0" class="nav-counter" x-text="kit.guided_tutorial_steps?.length"></span>
-              </button>
-
-              <button
-                class="nav-item"
-                :class="activeTab === 'graph' ? 'is-active' : ''"
-                @click="activeTab = 'graph'"
-              >
-                <div class="nav-item-left">
-                  <svg class="nav-icon" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M7.217 10.907a2.25 2.25 0 100 2.186m0-2.186c.18.324.283.696.283 1.093s-.103.77-.283 1.093m0-2.186l9.566-5.314m-9.566 7.5l9.566 5.314m0 0a2.25 2.25 0 103.935 2.186 2.25 2.25 0 00-3.935-2.186zm0-12.814a2.25 2.25 0 103.933-2.185 2.25 2.25 0 00-3.933 2.185z"/>
-                  </svg>
-                  <span>Concept Graph</span>
-                </div>
-                <span x-show="(kit.concept_nodes?.length || 0) > 0" class="nav-counter" x-text="kit.concept_nodes?.length"></span>
-              </button>
-            </div>
+    <template x-if="hasActiveKit && activeTab !== 'ingest' && activeTab !== 'workbench'">
+      <div>
+        <div class="qz-set-header">
+          <div class="qz-breadcrumb">
+            <span
+              style="cursor: pointer; text-decoration: underline;"
+              @click="selectedSubjectFilter = kit.subject_area || 'ALL'; activeTab = 'ingest'"
+              x-text="kit.subject_area || 'General Subject'"
+            ></span>
+            <span style="color: var(--text-muted);">/</span>
+            <span style="color: var(--text-secondary);" x-text="`${(kit.flashcards || []).length} terms • ${(kit.practice_problems || []).length} questions`"></span>
           </div>
 
-          <!-- Group 2: Practice & AI Coaching -->
-          <div class="nav-group">
-            <div class="nav-group-label">Interactive Lab &amp; Coach</div>
-            <div class="nav-list">
+          <div class="qz-set-title-row">
+            <h1 class="qz-set-title" x-text="kit.title"></h1>
+            <div style="display: flex; align-items: center; gap: 8px;">
               <button
-                class="nav-item"
-                :class="activeTab === 'workbench' ? 'is-active' : ''"
-                @click="activeTab = 'workbench'"
+                class="qz-btn"
+                style="padding: 7px 14px; font-size: 13px;"
+                @click="ingestMode = 'append_kit'; ingestSubjectName = kit.subject_area || ''; activeTab = 'ingest'"
               >
-                <div class="nav-item-left">
-                  <svg class="nav-icon" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487zm0 0L19.5 7.125"/>
-                  </svg>
-                  <span>Whiteboard &amp; Solver</span>
-                </div>
-                <span class="nav-counter">3 MODES</span>
+                + Add Materials to Set
               </button>
-
               <button
-                class="nav-item"
-                :class="activeTab === 'practice' ? 'is-active' : ''"
-                @click="activeTab = 'practice'"
+                class="qz-btn"
+                style="padding: 7px 14px; font-size: 13px; color: var(--learning-coral);"
+                @click="deleteStudyKit(currentKitId)"
               >
-                <div class="nav-item-left">
-                  <svg class="nav-icon" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10"/>
-                  </svg>
-                  <span>Practice &amp; Grader</span>
-                </div>
-                <span x-show="(kit.practice_problems?.length || 0) > 0" class="nav-counter" x-text="kit.practice_problems?.length"></span>
-              </button>
-
-              <button
-                class="nav-item"
-                :class="activeTab === 'flashcards' ? 'is-active' : ''"
-                @click="activeTab = 'flashcards'"
-              >
-                <div class="nav-item-left">
-                  <svg class="nav-icon" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M6.429 9.75L2.25 12l4.179 2.25m0-4.5l5.571 3 5.571-3m-11.142 0L2.25 7.5 12 2.25l9.75 5.25-4.179 2.25m0 0L21.75 12l-4.179 2.25m0 0l4.179 2.25L12 21.75 2.25 16.5l4.179-2.25m11.142 0l-5.571 3-5.571-3"/>
-                  </svg>
-                  <span>Flashcard Deck</span>
-                </div>
-                <span x-show="(kit.flashcards?.length || 0) > 0" class="nav-counter" x-text="`${masteredCardCount}/${kit.flashcards?.length}`"></span>
-              </button>
-
-              <button
-                class="nav-item"
-                :class="activeTab === 'tutor' ? 'is-active' : ''"
-                @click="activeTab = 'tutor'"
-              >
-                <div class="nav-item-left">
-                  <svg class="nav-icon" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"/>
-                  </svg>
-                  <span>AI Tutor &amp; Live Voice</span>
-                </div>
-                <span class="nav-counter">LIVE</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- Group 3: Materials -->
-          <div class="nav-group">
-            <div class="nav-group-label">Materials</div>
-            <div class="nav-list">
-              <button
-                class="nav-item"
-                :class="activeTab === 'ingest' ? 'is-active' : ''"
-                @click="activeTab = 'ingest'"
-              >
-                <div class="nav-item-left">
-                  <svg class="nav-icon" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
-                  </svg>
-                  <span>Upload &amp; Sources</span>
-                </div>
-                <span x-show="sources.length > 0" class="nav-counter" x-text="sources.length"></span>
+                Delete Set
               </button>
             </div>
           </div>
         </div>
 
-        <!-- Bottom: Subjects & Saved Study Kits Library -->
-        <div class="sidebar-footer">
-          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
-            <div class="nav-group-label" style="padding: 0; margin: 0;">
-              Subjects &amp; Study Kits (<span x-text="filteredKitsList.length"></span>)
-            </div>
-            <button
-              style="background: none; border: none; color: var(--accent-text); font-size: 11px; font-weight: 600; cursor: pointer;"
-              @click="showNewSubjectInput = !showNewSubjectInput"
-            >+ Subject</button>
-          </div>
-
-          <!-- Quick New Subject Creator -->
-          <div x-show="showNewSubjectInput" style="display: flex; gap: 4px; margin-bottom: 8px;">
-            <input
-              type="text"
-              x-model="newSubjectDraft"
-              @keydown.enter.prevent="createSubjectFolder()"
-              placeholder="e.g. Organic Chemistry"
-              class="input-field"
-              style="padding: 5px 8px; font-size: 11.5px;"
-            />
-            <button class="btn btn-primary" style="padding: 4px 8px; font-size: 11px;" @click="createSubjectFolder()">Add</button>
-          </div>
-
-          <!-- Subject Filter Pills -->
-          <div x-show="allSubjects.length > 0" style="display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 8px;">
-            <button
-              style="padding: 2px 7px; border-radius: 5px; font-size: 10.5px; font-weight: 600; cursor: pointer; border: 1px solid var(--border-subtle);"
-              :style="selectedSubjectFilter === 'ALL' ? 'background: var(--accent-soft); color: var(--accent-text); border-color: var(--accent-border);' : 'background: var(--bg-surface); color: var(--text-muted);'"
-              @click="selectSubjectFilter('ALL')"
-            >All</button>
-            <template x-for="subj in allSubjects" :key="subj">
-              <button
-                style="padding: 2px 7px; border-radius: 5px; font-size: 10.5px; font-weight: 600; cursor: pointer; border: 1px solid var(--border-subtle); max-width: 115px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
-                :style="selectedSubjectFilter === subj ? 'background: var(--accent-soft); color: var(--accent-text); border-color: var(--accent-border);' : 'background: var(--bg-surface); color: var(--text-secondary);'"
-                @click="selectSubjectFilter(subj)"
-                x-text="subj"
-              ></button>
-            </template>
-          </div>
-
-          <template x-if="filteredKitsList.length === 0">
-            <div style="font-size: 11.5px; color: var(--text-muted); line-height: 1.5;">
-              <span x-text="selectedSubjectFilter === 'ALL' ? 'No study kits yet. Create subjects and upload materials to begin.' : `No study kits in '${selectedSubjectFilter}' yet. Upload materials on the right.`"></span>
-            </div>
-          </template>
-
-          <div style="display: flex; flex-direction: column; gap: 3px; max-height: 150px; overflow-y: auto;">
-            <template x-for="k in filteredKitsList" :key="k.id">
-              <div
-                class="kit-list-item"
-                :class="currentKitId === k.id ? 'is-selected' : ''"
-                @click="loadStudyKit(k.id); activeTab = 'explainer'"
-              >
-                <div style="min-width: 0; flex: 1;">
-                  <div style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600;" x-text="k.title"></div>
-                  <div style="font-size: 10px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" x-text="k.subject_area || 'General'"></div>
-                </div>
-                <button
-                  style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 11px; padding: 0 4px;"
-                  title="Delete Study Kit"
-                  @click.stop="deleteStudyKit(k.id)"
-                >✕</button>
-              </div>
-            </template>
-          </div>
-        </div>
-      </aside>
-
-      <!-- ================================================================
-           MAIN SCROLLABLE STAGE
-           ================================================================ -->
-      <main class="app-main">
-        <div class="main-container">
-
-          <!-- Empty State when clicking a Course Tab before any Study Kit exists -->
-          <div
-            x-show="!hasActiveKit && ['explainer', 'lessons', 'tutorials', 'practice', 'flashcards', 'graph'].includes(activeTab)"
-            x-cloak
-            class="surface-card"
-            style="text-align: center; padding: 56px 32px;"
+        <!-- Quizlet's Signature 6 Study Mode Tiles -->
+        <div class="qz-mode-tiles">
+          <button
+            class="qz-mode-tile"
+            :class="activeTab === 'flashcards' ? 'is-active' : ''"
+            @click="activeTab = 'flashcards'"
           >
-            <div class="feature-icon-box" style="width: 48px; height: 48px; border-radius: 12px; margin: 0 auto 14px auto;">
-              <svg width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15"/>
+            <div class="qz-mode-tile-icon" style="background: var(--brand-primary-soft); color: var(--brand-primary);">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                <rect width="16" height="12" x="4" y="6" rx="2"/><path stroke-linecap="round" d="M8 3h10a2 2 0 0 1 2 2v9"/>
               </svg>
             </div>
-            <h2 style="font-size: 19px; font-weight: 700; color: var(--text-primary);">No Study Kit Loaded Yet</h2>
-            <p style="font-size: 13.5px; color: var(--text-secondary); max-width: 480px; margin: 8px auto 20px auto;">
-              Drop your PDFs, slides, Word docs, ZIPs, YouTube links, or lecture notes into the ingestion studio to synthesize this workspace.
-            </p>
-            <button class="btn btn-primary btn-lg" @click="activeTab = 'ingest'">
-              Ingest Study Materials →
+            <span>Flashcards</span>
+          </button>
+
+          <button
+            class="qz-mode-tile"
+            :class="activeTab === 'lessons' ? 'is-active' : ''"
+            @click="activeTab = 'lessons'; $nextTick(() => typesetMath())"
+          >
+            <div class="qz-mode-tile-icon" style="background: var(--know-green-soft); color: var(--know-green);">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="9"/><path stroke-linecap="round" stroke-linejoin="round" d="m9 12 2 2 4-4"/>
+              </svg>
+            </div>
+            <span>Learn</span>
+          </button>
+
+          <button
+            class="qz-mode-tile"
+            :class="activeTab === 'practice' ? 'is-active' : ''"
+            @click="activeTab = 'practice'; $nextTick(() => typesetMath())"
+          >
+            <div class="qz-mode-tile-icon" style="background: var(--accent-gold-soft); color: var(--accent-gold-text);">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2M9 5a2 2 0 0 0 2 2h2a2 2 0 0 0 2-2M9 5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2m-6 9 2 2 4-4"/>
+              </svg>
+            </div>
+            <span>Test</span>
+          </button>
+
+          <button
+            class="qz-mode-tile"
+            :class="activeTab === 'workbench' ? 'is-active' : ''"
+            @click="activeTab = 'workbench'; $nextTick(() => { if (wbMode === 'learning') initWhiteboardCanvas(); })"
+          >
+            <div class="qz-mode-tile-icon" style="background: var(--purple-note-soft); color: var(--purple-note);">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L6.832 19.82a4.5 4.5 0 01-1.897 1.13l-2.685.8.8-2.685a4.5 4.5 0 011.13-1.897L16.863 4.487z"/>
+              </svg>
+            </div>
+            <span>Solver</span>
+          </button>
+
+          <button
+            class="qz-mode-tile"
+            :class="activeTab === 'explainer' ? 'is-active' : ''"
+            @click="activeTab = 'explainer'; $nextTick(() => renderCurrentSlideVisuals())"
+          >
+            <div class="qz-mode-tile-icon" style="background: var(--info-blue-soft); color: var(--info-blue);">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                <polygon points="5 3 19 12 5 21 5 3"/>
+              </svg>
+            </div>
+            <span>Breakdown</span>
+          </button>
+
+          <button
+            class="qz-mode-tile"
+            :class="activeTab === 'tutor' ? 'is-active' : ''"
+            @click="activeTab = 'tutor'; $nextTick(() => typesetMath())"
+          >
+            <div class="qz-mode-tile-icon" style="background: var(--learning-coral-soft); color: var(--learning-coral);">
+              <svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M8 10h.01M12 10h.01M16 10h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z"/>
+              </svg>
+            </div>
+            <span>AI Tutor</span>
+          </button>
+        </div>
+      </div>
+    </template>
+
+    <!-- ==================================================================
+         VIEW 1: FLASHCARDS & STUDY SET OVERVIEW (Signature Quizlet View)
+         ================================================================== -->
+    <section x-show="activeTab === 'flashcards' && hasActiveKit" x-cloak>
+      <template x-if="currentFlashcard">
+        <div class="qz-flashcard-stage">
+          <!-- 3D Flip Card -->
+          <div class="qz-card-scene" @click="isCardFlipped = !isCardFlipped">
+            <div class="qz-card-flipper" :class="isCardFlipped ? 'is-flipped' : ''">
+
+              <!-- Front: Term / Prompt -->
+              <div class="qz-card-face">
+                <div class="qz-card-topbar">
+                  <div class="qz-card-label">
+                    <span>Term</span>
+                    <span class="qz-badge qz-badge-indigo" x-text="currentFlashcard.category"></span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px;" @click.stop>
+                    <button
+                      class="qz-btn qz-btn-icon"
+                      style="width: 36px; height: 36px;"
+                      @click="speakTextAloud(currentFlashcard.front)"
+                      title="Listen with ElevenLabs Voice"
+                    >
+                      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path stroke-linecap="round" d="M15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="qz-card-body">
+                  <div class="qz-card-text" x-html="renderMarkdown(currentFlashcard.front)"></div>
+                </div>
+
+                <div class="qz-card-footer">
+                  Click card or press <strong>Spacebar</strong> to flip
+                </div>
+              </div>
+
+              <!-- Back: Definition / Answer -->
+              <div class="qz-card-face qz-card-back">
+                <div class="qz-card-topbar">
+                  <div class="qz-card-label">
+                    <span style="color: var(--know-green);">Definition</span>
+                    <span class="qz-badge" x-text="currentFlashcard.category"></span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 8px;" @click.stop>
+                    <button
+                      class="qz-btn qz-btn-icon"
+                      style="width: 36px; height: 36px;"
+                      @click="speakTextAloud(currentFlashcard.back)"
+                      title="Listen with ElevenLabs Voice"
+                    >
+                      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                        <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path stroke-linecap="round" d="M15.54 8.46a5 5 0 0 1 0 7.07M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="qz-card-body">
+                  <div class="qz-card-text" style="font-size: 21px;" x-html="renderMarkdown(currentFlashcard.back)"></div>
+                  <template x-if="currentFlashcard.mnemonic_or_tip">
+                    <div style="margin-top: 16px; padding: 10px 16px; border-radius: 10px; background: var(--accent-gold-soft); color: var(--accent-gold-text); font-size: 13.5px; font-weight: 600;">
+                      💡 Memory Hook: <span x-text="currentFlashcard.mnemonic_or_tip"></span>
+                    </div>
+                  </template>
+                </div>
+
+                <div class="qz-card-footer">
+                  Click card or press <strong>Spacebar</strong> to flip back
+                </div>
+              </div>
+
+            </div>
+          </div>
+
+          <!-- Deck Navigation & Quizlet "Still learning" / "Know" Controls -->
+          <div class="qz-deck-controls">
+            <button class="qz-rating-pill qz-rating-learning" @click="rateFlashcard('hard')">
+              <span>✕ Still learning</span>
+              <span class="qz-badge qz-badge-coral" x-text="stillLearningCount"></span>
+            </button>
+
+            <div class="qz-deck-arrows">
+              <button
+                class="qz-arrow-btn"
+                @click="isCardFlipped = false; if (currentCardIndex > 0) currentCardIndex--; $nextTick(() => typesetMath())"
+                :disabled="currentCardIndex === 0"
+                title="Previous card"
+              >
+                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
+                </svg>
+              </button>
+
+              <span style="font-size: 15px; font-weight: 800; color: var(--text-secondary); min-width: 64px; text-align: center;" x-text="`${currentCardIndex + 1} / ${(kit.flashcards || []).length}`"></span>
+
+              <button
+                class="qz-arrow-btn"
+                @click="isCardFlipped = false; if (currentCardIndex < kit.flashcards.length - 1) currentCardIndex++; $nextTick(() => typesetMath())"
+                :disabled="currentCardIndex >= (kit.flashcards?.length || 1) - 1"
+                title="Next card"
+              >
+                <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
+                </svg>
+              </button>
+            </div>
+
+            <button class="qz-rating-pill qz-rating-know" @click="rateFlashcard('easy')">
+              <span>✓ Know</span>
+              <span class="qz-badge qz-badge-green" x-text="masteredCardCount"></span>
             </button>
           </div>
 
-          <!-- ============================================================
-               VIEW 8 (DEFAULT HOME): UNIVERSAL MATERIAL INGESTION STUDIO
-               ============================================================ -->
-          <section x-show="activeTab === 'ingest'" x-cloak>
-            <div class="section-header">
-              <div>
-                <div class="section-eyebrow">Multimodal Course Synthesis Studio</div>
-                <h1 class="section-title">What would you like to master today?</h1>
-                <p class="section-desc">
-                  Upload any files, archives, links, or notes. Modernality builds interactive breakdown videos, structured lessons, practice exams, flashcards, and a live Socratic tutor.
-                </p>
-              </div>
-            </div>
-
-            <div class="surface-card" style="display: flex; flex-direction: column; gap: 20px;">
-              <!-- Subject Assignment & Synthesis Mode Selector -->
-              <div class="grid-12" style="padding-bottom: 16px; border-bottom: 1px solid var(--border-subtle); align-items: end;">
-                <div class="col-6">
-                  <label class="field-label">Subject / Course Workspace</label>
-                  <input
-                    type="text"
-                    x-model="ingestSubjectName"
-                    list="subjectSuggestionsList"
-                    class="input-field"
-                    placeholder="e.g., Organic Chemistry, Linear Algebra, Macroeconomics (or leave blank to auto-detect)"
-                  />
-                  <datalist id="subjectSuggestionsList">
-                    <template x-for="subj in allSubjects" :key="subj">
-                      <option :value="subj"></option>
-                    </template>
-                  </datalist>
-                </div>
-
-                <div class="col-6">
-                  <label class="field-label">Material Organization Mode</label>
-                  <div class="pill-tabs" style="width: 100%; display: flex;">
-                    <button
-                      type="button"
-                      class="pill-tab"
-                      style="flex: 1;"
-                      :class="ingestMode === 'new_kit' ? 'is-active' : ''"
-                      @click="ingestMode = 'new_kit'"
-                    >
-                      Create Isolated Study Kit
-                    </button>
-                    <button
-                      type="button"
-                      class="pill-tab"
-                      style="flex: 1;"
-                      :class="ingestMode === 'append_kit' ? 'is-active' : ''"
-                      :disabled="!hasActiveKit"
-                      @click="if (hasActiveKit) ingestMode = 'append_kit'"
-                      :title="hasActiveKit ? 'Merge these new materials into your currently active Study Kit' : 'Load a Study Kit first to append materials to it'"
-                    >
-                      Add to Current Study Kit
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <!-- Drag & Drop Zone -->
-              <div
-                class="upload-dropzone"
-                @dragover.prevent
-                @drop="handleFileDrop($event)"
-                @click="$refs.fileInput.click()"
-              >
-                <input type="file" x-ref="fileInput" multiple style="display: none;" @change="handleFileSelect($event)" />
-                <div class="feature-icon-box" style="width: 42px; height: 42px; border-radius: 10px; margin: 0 auto 10px auto;">
-                  <svg width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 16.5V9.75m0 0l3 3m-3-3l-3 3M6.75 19.5a4.5 4.5 0 01-1.41-8.775 5.25 5.25 0 0110.233-2.33 3 3 0 013.758 3.848A3.752 3.752 0 0118 19.5H6.75z"/>
-                  </svg>
-                </div>
-                <div style="font-size: 14.5px; font-weight: 700; color: var(--text-primary);">
-                  Click to select files or drag &amp; drop them here
-                </div>
-                <div style="font-size: 12.5px; color: var(--text-muted); margin-top: 3px;">
-                  Combine multiple files, archives, and formats into a single unified course
-                </div>
-
-                <div class="format-pills">
-                  <span class="format-pill">PDF</span>
-                  <span class="format-pill">DOCX</span>
-                  <span class="format-pill">PPTX</span>
-                  <span class="format-pill">XLSX / CSV</span>
-                  <span class="format-pill">ZIP Archive</span>
-                  <span class="format-pill">PNG / JPEG</span>
-                  <span class="format-pill">MP3 / MP4</span>
-                  <span class="format-pill">Jupyter / Code</span>
-                </div>
-              </div>
-
-              <!-- Queued Files -->
-              <div x-show="selectedFiles.length > 0">
-                <div class="field-label">Queued Files (<span x-text="selectedFiles.length"></span>)</div>
-                <div class="mcq-grid">
-                  <template x-for="(f, idx) in selectedFiles" :key="idx">
-                    <div style="display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-radius: 8px; background: var(--bg-surface-2); border: 1px solid var(--border-default); font-size: 12.5px;">
-                      <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" x-text="`${f.name} (${formatBytes(f.size)})`"></span>
-                      <button class="btn btn-rose" style="padding: 2px 7px; font-size: 11px;" @click="removeSelectedFile(idx)">✕</button>
-                    </div>
-                  </template>
-                </div>
-              </div>
-
-              <!-- Links + Raw Notes -->
-              <div class="grid-12">
-                <div class="col-6">
-                  <label class="field-label">YouTube, Google Drive &amp; Web Links</label>
-                  <div style="display: flex; gap: 8px;">
-                    <input
-                      type="url"
-                      x-model="urlInput"
-                      @keydown.enter.prevent="addUrlToList()"
-                      class="input-field"
-                      placeholder="https://youtube.com/watch?v=... or docs.google.com/..."
-                    />
-                    <button type="button" class="btn" @click="addUrlToList()">Add Link</button>
-                  </div>
-                  <div x-show="addedUrls.length > 0" style="display: flex; flex-direction: column; gap: 6px; margin-top: 8px;">
-                    <template x-for="(u, idx) in addedUrls" :key="idx">
-                      <div style="display: flex; align-items: center; justify-content: space-between; padding: 6px 10px; border-radius: 6px; background: var(--accent-soft); border: 1px solid var(--accent-border); font-size: 12px; color: var(--accent-text);">
-                        <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" x-text="u"></span>
-                        <button style="background:none; border:none; color:var(--danger-text); cursor:pointer; font-weight:700;" @click="removeUrlFromList(idx)">✕</button>
-                      </div>
-                    </template>
-                  </div>
-                </div>
-
-                <div class="col-6">
-                  <label class="field-label">Lecture Notes, Syllabus, or Direct Topic Prompt</label>
-                  <textarea
-                    x-model="rawNotes"
-                    rows="3"
-                    class="textarea-field"
-                    placeholder="Paste lecture notes, equations, or type any topic you want Modernality to teach you..."
-                  ></textarea>
-                </div>
-              </div>
-
-              <!-- Synthesis Controls Bar -->
-              <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-top: 16px; border-top: 1px solid var(--border-subtle);">
-                <div style="flex: 1; min-width: 240px;">
-                  <input
-                    type="text"
-                    x-model="customFocus"
-                    class="input-field"
-                    placeholder="Optional focus (e.g., 'Emphasize mathematical proofs, code examples, and exam traps')"
-                  />
-                </div>
-
-                <button
-                  class="btn btn-primary btn-lg"
-                  @click="synthesizeCourse()"
-                  :disabled="isSynthesizing"
-                >
-                  <span x-text="isSynthesizing ? (synthesisStepText || 'Synthesizing Course...') : 'Synthesize Study Kit →'"></span>
-                </button>
-              </div>
-            </div>
-
-            <!-- 6-Card Studio Capabilities Overview -->
-            <div class="feature-bento">
-              <button class="feature-card" @click="activeTab = 'explainer'">
-                <div class="feature-icon-box">
-                  <svg width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M5.25 5.653c0-.856.917-1.398 1.667-.986l11.54 6.348a1.125 1.125 0 010 1.971l-11.54 6.347a1.125 1.125 0 01-1.667-.985V5.653z"/>
-                  </svg>
-                </div>
-                <div style="font-size: 13.5px; font-weight: 700; color: var(--text-primary);">Breakdown Videos &amp; Animations</div>
-                <p style="font-size: 12px; color: var(--text-secondary);">Synced slide breakdowns with natural voice narration, architecture diagrams, and visual animations.</p>
-              </button>
-
-              <button class="feature-card" @click="activeTab = 'lessons'">
-                <div class="feature-icon-box">
-                  <svg width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25"/>
-                  </svg>
-                </div>
-                <div style="font-size: 13.5px; font-weight: 700; color: var(--text-primary);">Modular Lesson Plans</div>
-                <p style="font-size: 12px; color: var(--text-secondary);">Structured curriculum modules with learning objectives, intuitive real-world analogies, and common pitfalls.</p>
-              </button>
-
-              <button class="feature-card" @click="activeTab = 'tutorials'">
-                <div class="feature-icon-box">
-                  <svg width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                  </svg>
-                </div>
-                <div style="font-size: 13.5px; font-weight: 700; color: var(--text-primary);">Guided Step-by-Step Tutorials</div>
-                <p style="font-size: 12px; color: var(--text-secondary);">Interactive worked examples and derivations with inline comprehension checks at every stage.</p>
-              </button>
-
-              <button class="feature-card" @click="activeTab = 'practice'">
-                <div class="feature-icon-box">
-                  <svg width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931z"/>
-                  </svg>
-                </div>
-                <div style="font-size: 13.5px; font-weight: 700; color: var(--text-primary);">Practice &amp; AI Step Grader</div>
-                <p style="font-size: 12px; color: var(--text-secondary);">Progressive hints and open-response derivation grading that pinpoints exact conceptual errors.</p>
-              </button>
-
-              <button class="feature-card" @click="activeTab = 'flashcards'">
-                <div class="feature-icon-box">
-                  <svg width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M6.429 9.75L2.25 12l4.179 2.25m0-4.5l5.571 3 5.571-3m-11.142 0L2.25 7.5 12 2.25l9.75 5.25-4.179 2.25"/>
-                  </svg>
-                </div>
-                <div style="font-size: 13.5px; font-weight: 700; color: var(--text-primary);">3D Spaced Repetition Deck</div>
-                <p style="font-size: 12px; color: var(--text-secondary);">Active recall flashcards with memory hooks and SM-2 confidence scheduling.</p>
-              </button>
-
-              <button class="feature-card" @click="activeTab = 'tutor'">
-                <div class="feature-icon-box">
-                  <svg width="17" height="17" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"/>
-                  </svg>
-                </div>
-                <div style="font-size: 13.5px; font-weight: 700; color: var(--text-primary);">Socratic Chat &amp; Live Voice Tutor</div>
-                <p style="font-size: 12px; color: var(--text-secondary);">Multi-turn chat with image upload plus real-time voice &amp; screen sharing.</p>
-              </button>
-            </div>
-          </section>
-
-          <!-- ============================================================
-               VIEW 1: BREAKDOWN EXPLAINER VIDEO PLAYER
-               ============================================================ -->
-          <section x-show="activeTab === 'explainer' && hasActiveKit" x-cloak>
-            <div class="section-header">
-              <div>
-                <div class="section-eyebrow">
-                  <span x-text="kit.subject_area"></span>
-                  <span>•</span>
-                  <span x-text="`~${kit.estimated_total_minutes || 30} min mastery`"></span>
-                </div>
-                <h1 class="section-title" x-text="kit.title"></h1>
-              </div>
-
-              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                <select
-                  x-model="selectedVoice"
-                  class="select-field"
-                  style="width: auto; padding: 6px 10px; font-size: 12px;"
-                >
-                  <option value="Kore">Voice: Kore (Educator)</option>
-                  <option value="Puck">Voice: Puck (Dynamic)</option>
-                  <option value="Charon">Voice: Charon (Professor)</option>
-                  <option value="Fenrir">Voice: Fenrir (Technical)</option>
-                  <option value="Aoede">Voice: Aoede (Narrative)</option>
-                </select>
-
-                <button class="btn" @click="generateGeminiSlideTts()" :disabled="isGeneratingTts">
-                  <span x-text="isGeneratingTts ? 'Synthesizing Audio...' : 'Generate HD Voiceover'"></span>
-                </button>
-
-                <button class="btn btn-cyan" @click="generateGeminiSlideVideo()" :disabled="isGeneratingVideo">
-                  <span x-text="isGeneratingVideo ? 'Rendering Video...' : 'Render Concept Video'"></span>
-                </button>
-              </div>
-            </div>
-
-            <template x-if="currentSlide">
-              <div class="cinema-stage">
-                <div class="cinema-header">
-                  <div>
-                    <div class="slide-step-pill" x-text="`Slide ${currentSlide.slide_number} of ${kit.explainer_slides.length}`"></div>
-                    <h2 class="slide-main-title" x-text="currentSlide.title"></h2>
-                    <p class="slide-subtitle" x-text="currentSlide.subtitle"></p>
-                  </div>
-
-                  <div class="btn" style="cursor: default; pointer-events: none; font-size: 11.5px;">
-                    <span class="status-dot" :class="slideAudioUrls[String(currentSlide.slide_number)] ? 'dot-emerald' : 'dot-cyan'"></span>
-                    <span x-text="slideAudioUrls[String(currentSlide.slide_number)] ? 'Studio Audio Ready' : 'Voiceover Ready'"></span>
-                  </div>
-                </div>
-
-                <div class="cinema-body">
-                  <div>
-                    <ul class="bullet-stack">
-                      <template x-for="(bullet, bIdx) in currentSlide.bullets" :key="bIdx">
-                        <li class="bullet-card">
-                          <span class="bullet-index" x-text="bIdx + 1"></span>
-                          <span class="bullet-text" x-text="bullet"></span>
-                        </li>
-                      </template>
-                    </ul>
-
-                    <div x-show="currentSlide.key_formula_or_code" class="formula-banner">
-                      <div class="formula-label">Core Mathematical / Algorithmic Relation</div>
-                      <div style="font-size: 15px;" x-html="renderFormulaHtml(currentSlide.key_formula_or_code)"></div>
-                    </div>
-                  </div>
-
-                  <div class="visual-pane">
-                    <template x-if="slideVideoUrls[String(currentSlide.slide_number)]">
-                      <div style="border-radius: 10px; overflow: hidden; border: 1px solid var(--cyan-border); background: #000;">
-                        <video
-                          :src="slideVideoUrls[String(currentSlide.slide_number)]"
-                          controls
-                          autoplay
-                          loop
-                          style="width: 100%; display: block;"
-                        ></video>
-                        <div style="padding: 8px 12px; display: flex; justify-content: space-between; font-size: 11px; color: var(--cyan-text); background: var(--bg-surface-2);">
-                          <span>Concept Video Animation</span>
-                          <a :href="slideVideoUrls[String(currentSlide.slide_number)]" download style="color: var(--text-primary); text-decoration: underline;">Download MP4</a>
-                        </div>
-                      </div>
-                    </template>
-
-                    <template x-if="renderedMermaidSvg">
-                      <div class="diagram-frame">
-                        <div class="formula-label" style="margin-bottom: 10px;">Concept Architecture Diagram</div>
-                        <div style="width: 100%; display: flex; justify-content: center; overflow-x: auto;" x-html="renderedMermaidSvg"></div>
-                      </div>
-                    </template>
-
-                    <div style="padding: 12px 14px; border-radius: 10px; background: var(--bg-surface-2); border: 1px solid var(--border-subtle);">
-                      <div class="formula-label">Visual Scene Description</div>
-                      <p style="font-size: 12px; color: var(--text-secondary); line-height: 1.5;" x-text="currentSlide.visual_video_prompt"></p>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="cinema-footer">
-                  <div class="teleprompter-bar">
-                    <span class="teleprompter-tag">Narration</span>
-                    <p class="teleprompter-text" x-text="currentSlide.narration"></p>
-                  </div>
-
-                  <div class="transport-bar">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                      <button
-                        class="btn"
-                        @click="if (currentSlideIndex > 0) currentSlideIndex--"
-                        :disabled="currentSlideIndex === 0"
-                      >
-                        ← Previous
-                      </button>
-
-                      <button class="btn btn-primary" @click="toggleSlidePlayback()">
-                        <span x-text="isPlayingSlide ? 'Pause Narration' : 'Play Slide Breakdown'"></span>
-                      </button>
-
-                      <button
-                        class="btn"
-                        @click="if (currentSlideIndex < kit.explainer_slides.length - 1) currentSlideIndex++"
-                        :disabled="currentSlideIndex >= kit.explainer_slides.length - 1"
-                      >
-                        Next Slide →
-                      </button>
-                    </div>
-
-                    <div class="scrubber-dots">
-                      <template x-for="(s, idx) in kit.explainer_slides" :key="idx">
-                        <button
-                          class="scrubber-dot"
-                          :class="currentSlideIndex === idx ? 'is-active' : ''"
-                          @click="currentSlideIndex = idx"
-                          :title="s.title"
-                        ></button>
-                      </template>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </template>
-
-            <div class="surface-card" style="margin-top: 18px;">
-              <div class="field-label">Executive Course Overview</div>
-              <p style="color: var(--text-secondary); font-size: 13.5px; line-height: 1.65;" x-text="kit.executive_summary"></p>
-            </div>
-          </section>
-
-          <!-- ============================================================
-               VIEW 2: MODULAR LESSON PLANS
-               ============================================================ -->
-          <section x-show="activeTab === 'lessons' && hasActiveKit" x-cloak>
-            <div class="section-header">
-              <div>
-                <div class="section-eyebrow">Structured Curriculum</div>
-                <h1 class="section-title">Modular Lesson Plans</h1>
-                <p class="section-desc">Deep-dive chapters with learning objectives, intuitive analogies, and exam pitfalls.</p>
-              </div>
-
-              <div class="pill-tabs">
-                <template x-for="(mod, mIdx) in kit.lesson_modules" :key="mIdx">
-                  <button
-                    class="pill-tab"
-                    :class="activeModuleIndex === mIdx ? 'is-active' : ''"
-                    @click="activeModuleIndex = mIdx; $nextTick(() => typesetMath())"
-                    x-text="`Module ${mod.module_number}: ${mod.title}`"
-                  ></button>
-                </template>
-              </div>
-            </div>
-
-            <template x-if="currentModule">
-              <div class="grid-12">
-                <div class="col-8 surface-card">
-                  <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding-bottom: 14px; margin-bottom: 16px;">
-                    <div>
-                      <div class="section-eyebrow" x-text="`Module ${currentModule.module_number} • ${currentModule.difficulty}`"></div>
-                      <h2 style="font-size: 20px; font-weight: 800; color: var(--text-primary);" x-text="currentModule.title"></h2>
-                    </div>
-                    <span class="nav-counter" x-text="`${currentModule.duration_minutes} min`"></span>
-                  </div>
-
-                  <p style="padding: 12px 14px; border-radius: 8px; background: var(--bg-surface-2); border: 1px solid var(--border-subtle); color: var(--text-secondary); font-size: 13px; margin-bottom: 18px;" x-text="currentModule.summary"></p>
-
-                  <div class="markdown-body" x-html="renderMarkdown(currentModule.core_concepts_markdown)"></div>
-                </div>
-
-                <div class="col-4" style="display: flex; flex-direction: column; gap: 16px;">
-                  <div class="surface-card">
-                    <div class="field-label" style="color: var(--accent-text);">Learning Objectives</div>
-                    <ul style="list-style: none; display: flex; flex-direction: column; gap: 8px; margin-top: 8px;">
-                      <template x-for="(obj, oIdx) in currentModule.learning_objectives" :key="oIdx">
-                        <li style="display: flex; gap: 8px; font-size: 12.5px; color: var(--text-secondary);">
-                          <span style="color: var(--accent); font-weight: 700;">✓</span>
-                          <span x-text="obj"></span>
-                        </li>
-                      </template>
-                    </ul>
-                  </div>
-
-                  <div class="surface-card">
-                    <div class="field-label" style="color: var(--cyan-text);">Real-World Analogy</div>
-                    <p style="font-size: 12.5px; color: var(--text-secondary); line-height: 1.6; margin-top: 6px;" x-text="currentModule.real_world_analogy"></p>
-                  </div>
-
-                  <div class="surface-card">
-                    <div class="field-label" style="color: var(--danger-text);">Common Exam Pitfalls</div>
-                    <ul style="list-style: none; display: flex; flex-direction: column; gap: 8px; margin-top: 8px;">
-                      <template x-for="(pit, pIdx) in currentModule.common_pitfalls" :key="pIdx">
-                        <li style="display: flex; gap: 8px; font-size: 12.5px; color: var(--text-secondary);">
-                          <span style="color: var(--danger); font-weight: 700;">•</span>
-                          <span x-text="pit"></span>
-                        </li>
-                      </template>
-                    </ul>
-                  </div>
-                </div>
-              </div>
-            </template>
-          </section>
-
-          <!-- ============================================================
-               VIEW 3: GUIDED STEP-BY-STEP TUTORIALS
-               ============================================================ -->
-          <section x-show="activeTab === 'tutorials' && hasActiveKit" x-cloak>
-            <div class="section-header">
-              <div>
-                <div class="section-eyebrow">Interactive Walkthroughs</div>
-                <h1 class="section-title">Guided Step-by-Step Tutorials</h1>
-                <p class="section-desc">Worked derivations and problem-solving walkthroughs with instant micro-checks.</p>
-              </div>
-            </div>
-
-            <div style="display: flex; flex-direction: column; gap: 16px;">
-              <template x-for="(step, sIdx) in kit.guided_tutorial_steps" :key="sIdx">
-                <div class="surface-card">
-                  <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 10px;">
-                    <span class="bullet-index" style="width: 26px; height: 26px; font-size: 12.5px;" x-text="step.step_number"></span>
-                    <h3 style="font-size: 16.5px; font-weight: 700; color: var(--text-primary);" x-text="step.title"></h3>
-                  </div>
-
-                  <p style="color: var(--text-secondary); font-size: 13.5px; margin-bottom: 14px;" x-text="step.explanation"></p>
-
-                  <div class="markdown-body" style="padding: 14px 16px; border-radius: 10px; background: var(--bg-surface-2); border: 1px solid var(--border-subtle);" x-html="renderMarkdown(step.example_or_walkthrough)"></div>
-
-                  <div style="margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--border-subtle);">
-                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px;">
-                      <span style="font-size: 12.5px; font-weight: 600; color: var(--warning-text);" x-text="`Check Understanding: ${step.check_understanding_question}`"></span>
-                      <button
-                        class="btn"
-                        style="padding: 5px 10px; font-size: 11.5px;"
-                        @click="revealedTutorialChecks[sIdx] = !revealedTutorialChecks[sIdx]; $nextTick(() => typesetMath())"
-                        x-text="revealedTutorialChecks[sIdx] ? 'Hide Answer' : 'Reveal Answer'"
-                      ></button>
-                    </div>
-                    <div
-                      x-show="revealedTutorialChecks[sIdx]"
-                      style="margin-top: 10px; padding: 10px 14px; border-radius: 8px; background: var(--success-soft); border: 1px solid var(--success-border); color: var(--success-text); font-size: 12.5px;"
-                      x-text="step.check_understanding_answer"
-                    ></div>
-                  </div>
-                </div>
-              </template>
-            </div>
-          </section>
-
-          <!-- ============================================================
-               VIEW 4: PRACTICE & AUTOMATED AI EXAM GRADING
-               ============================================================ -->
-          <section x-show="activeTab === 'practice' && hasActiveKit" x-cloak>
-            <div class="section-header">
-              <div>
-                <div class="section-eyebrow">Active Assessment</div>
-                <h1 class="section-title">Practice Problems &amp; AI Step Grader</h1>
-                <p class="section-desc">Progressive hints, multiple-choice &amp; open derivations graded with rubric feedback.</p>
-              </div>
-
-              <div class="pill-tabs">
-                <template x-for="(prob, pIdx) in kit.practice_problems" :key="prob.id">
-                  <button
-                    class="pill-tab"
-                    :class="activeProblemIndex === pIdx ? 'is-active' : ''"
-                    @click="selectProblem(pIdx)"
-                  >
-                    <span x-text="`Problem ${pIdx + 1} (${prob.difficulty})`"></span>
-                  </button>
-                </template>
-              </div>
-            </div>
-
-            <template x-if="currentProblem">
-              <div class="surface-card" style="display: flex; flex-direction: column; gap: 18px;">
-                <div style="display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--border-subtle); padding-bottom: 12px;">
-                  <div style="display: flex; align-items: center; gap: 10px;">
-                    <span class="brand-badge" x-text="currentProblem.difficulty"></span>
-                    <span style="font-size: 12.5px; font-weight: 600; color: var(--text-secondary);" x-text="currentProblem.topic_tag"></span>
-                  </div>
-                  <span class="font-mono" style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;" x-text="currentProblem.question_type.replace('_', ' ')"></span>
-                </div>
-
-                <div class="markdown-body" style="font-size: 15px; color: var(--text-primary);" x-html="renderMarkdown(currentProblem.question)"></div>
-
-                <template x-if="currentProblem.question_type === 'multiple_choice' && currentProblem.options">
-                  <div class="mcq-grid">
-                    <template x-for="(opt, oIdx) in currentProblem.options" :key="oIdx">
-                      <button
-                        class="mcq-option"
-                        :class="selectedMcqOption === opt ? 'is-selected' : ''"
-                        @click="checkInstantMcq(opt)"
-                      >
-                        <span class="bullet-index" x-text="['A','B','C','D'][oIdx] || '•'"></span>
-                        <span x-text="opt"></span>
-                      </button>
-                    </template>
-                  </div>
-                </template>
-
-                <div>
-                  <label class="field-label">Show Your Work / Derivation (AI Tutor Grades Your Steps)</label>
-                  <textarea
-                    x-model="freeResponseDraft"
-                    rows="4"
-                    class="textarea-field"
-                    placeholder="Write your reasoning, mathematical steps, or explanation here..."
-                  ></textarea>
-                </div>
-
-                <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;">
-                  <div style="display: flex; align-items: center; gap: 8px;">
-                    <button
-                      class="btn btn-amber"
-                      @click="revealNextHint()"
-                      :disabled="revealedHintsCount >= (currentProblem.hints?.length || 0)"
-                    >
-                      Reveal Hint (<span x-text="`${revealedHintsCount}/${currentProblem.hints?.length || 0}`"></span>)
-                    </button>
-
-                    <button
-                      class="btn"
-                      @click="showSolution = !showSolution; $nextTick(() => typesetMath())"
-                      x-text="showSolution ? 'Hide Worked Solution' : 'View Worked Solution'"
-                    ></button>
-
-                    <button
-                      class="btn btn-cyan"
-                      @click="openPracticeProblemInWorkbench(currentProblem)"
-                    >
-                      Open in Interactive Whiteboard &amp; Solver →
-                    </button>
-                  </div>
-
-                  <button
-                    class="btn btn-primary btn-lg"
-                    @click="submitAnswerForAiGrading()"
-                    :disabled="isGrading"
-                  >
-                    <span x-text="isGrading ? 'Grading your steps...' : 'Grade My Steps with AI Tutor'"></span>
-                  </button>
-                </div>
-
-                <div x-show="revealedHintsCount > 0" style="display: flex; flex-direction: column; gap: 8px;">
-                  <template x-for="(h, hIdx) in (currentProblem.hints || []).slice(0, revealedHintsCount)" :key="hIdx">
-                    <div style="padding: 10px 14px; border-radius: 8px; background: var(--warning-soft); border: 1px solid var(--warning-border); color: var(--warning-text); font-size: 12.5px;">
-                      <strong x-text="`Hint ${hIdx + 1}: `"></strong>
-                      <span x-text="h"></span>
-                    </div>
-                  </template>
-                </div>
-
-                <template x-if="gradingResultsByProblem[currentProblem.id]">
-                  <div class="surface-card" style="background: var(--bg-surface-2);">
-                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                      <span class="brand-badge" x-text="`${gradingResultsByProblem[currentProblem.id].verdict} • Score: ${gradingResultsByProblem[currentProblem.id].score}/100`"></span>
-                    </div>
-                    <p style="font-size: 13.5px; color: var(--text-primary); line-height: 1.6;" x-text="gradingResultsByProblem[currentProblem.id].personalized_feedback"></p>
-                  </div>
-                </template>
-
-                <div x-show="showSolution" class="surface-card" style="background: var(--bg-surface-2);">
-                  <div class="field-label" style="color: var(--success-text);">Reference Step-by-Step Solution</div>
-                  <div class="markdown-body" x-html="renderMarkdown(currentProblem.step_by_step_solution)"></div>
-                </div>
-              </div>
-            </template>
-          </section>
-
-          <!-- ============================================================
-               VIEW 5: 3D SPACED REPETITION FLASHCARDS
-               ============================================================ -->
-          <section x-show="activeTab === 'flashcards' && hasActiveKit" x-cloak>
-            <div class="section-header">
-              <div>
-                <div class="section-eyebrow">Active Recall Deck</div>
-                <h1 class="section-title">Spaced Repetition Flashcards</h1>
-                <p class="section-desc">Click the card to flip in 3D, then rate your recall confidence to schedule reviews.</p>
-              </div>
-              <div class="btn" style="cursor: default;">
-                Card <span class="font-mono" x-text="currentCardIndex + 1"></span> of <span class="font-mono" x-text="kit.flashcards?.length || 0"></span>
-              </div>
-            </div>
-
-            <template x-if="currentFlashcard">
-              <div class="flashcard-stage">
-                <div class="flashcard-perspective" @click="flipCard()">
-                  <div class="flashcard-inner" :class="isCardFlipped ? 'is-flipped' : ''">
-                    <div class="flashcard-face">
-                      <div style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--accent-text);">
-                        <span x-text="currentFlashcard.category"></span>
-                        <span>Click to Flip ↻</span>
-                      </div>
-                      <div style="text-align: center; padding: 0 16px;">
-                        <h2 style="font-size: 20px; font-weight: 700; color: var(--text-primary); line-height: 1.45;" x-text="currentFlashcard.front"></h2>
-                      </div>
-                      <div style="text-align: center; font-size: 11.5px; color: var(--text-muted);">Prompt / Question</div>
-                    </div>
-
-                    <div class="flashcard-face flashcard-back">
-                      <div style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; color: var(--cyan-text);">
-                        <span>Answer &amp; Intuition</span>
-                        <span>Click to Flip Back ↺</span>
-                      </div>
-                      <div style="text-align: center; padding: 0 16px; display: flex; flex-direction: column; gap: 14px; align-items: center;">
-                        <p style="font-size: 16px; color: var(--text-primary); line-height: 1.55;" x-text="currentFlashcard.back"></p>
-                        <div
-                          x-show="currentFlashcard.mnemonic_or_tip"
-                          style="padding: 8px 14px; border-radius: 8px; background: var(--accent-soft); border: 1px solid var(--accent-border); color: var(--accent-text); font-size: 12px;"
-                        >
-                          <strong>Memory Hook:</strong> <span x-text="currentFlashcard.mnemonic_or_tip"></span>
-                        </div>
-                      </div>
-                      <div style="text-align: center; font-size: 11.5px; color: var(--text-muted);">Select confidence interval below</div>
-                    </div>
-                  </div>
-                </div>
-
-                <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 18px;">
-                  <button class="btn btn-rose" style="padding: 11px;" @click="rateCurrentCard('again')">Again (&lt; 1m)</button>
-                  <button class="btn btn-amber" style="padding: 11px;" @click="rateCurrentCard('hard')">Hard (6m)</button>
-                  <button class="btn btn-emerald" style="padding: 11px;" @click="rateCurrentCard('good')">Good (1d)</button>
-                  <button class="btn btn-cyan" style="padding: 11px;" @click="rateCurrentCard('easy')">Easy (4d)</button>
-                </div>
-              </div>
-            </template>
-          </section>
-
-          <!-- ============================================================
-               VIEW 6: INTERACTIVE CONCEPT KNOWLEDGE GRAPH
-               ============================================================ -->
-          <section x-show="activeTab === 'graph' && hasActiveKit" x-cloak>
-            <div class="section-header">
-              <div>
-                <div class="section-eyebrow">Relational Knowledge Map</div>
-                <h1 class="section-title">Interactive Concept Graph</h1>
-                <p class="section-desc">Drag nodes to explore dependencies. Click any concept node to inspect or ask the AI Tutor.</p>
-              </div>
-            </div>
-
-            <div class="grid-12">
-              <div class="col-8 surface-card" style="padding: 10px; position: relative; overflow: hidden;">
-                <canvas id="conceptGraphCanvas" style="width: 100%; height: 500px; display: block; cursor: grab;"></canvas>
-                <div style="position: absolute; bottom: 16px; left: 16px; display: flex; gap: 14px; padding: 6px 12px; border-radius: 8px; background: var(--bg-topbar); border: 1px solid var(--border-subtle); font-size: 11px;">
-                  <span style="display: flex; align-items: center; gap: 6px;"><span class="status-dot" style="background:#6366f1;"></span> Core</span>
-                  <span style="display: flex; align-items: center; gap: 6px;"><span class="status-dot" style="background:#06b6d4;"></span> Prerequisite</span>
-                  <span style="display: flex; align-items: center; gap: 6px;"><span class="status-dot" style="background:#10b981;"></span> Application</span>
-                </div>
-              </div>
-
-              <div class="col-4 surface-card">
-                <template x-if="selectedGraphNode">
-                  <div style="display: flex; flex-direction: column; justify-content: space-between; height: 100%; gap: 16px;">
-                    <div style="display: flex; flex-direction: column; gap: 12px;">
-                      <div>
-                        <span class="brand-badge" x-text="selectedGraphNode.category"></span>
-                        <h2 style="font-size: 19px; font-weight: 800; color: var(--text-primary); margin-top: 8px;" x-text="selectedGraphNode.label"></h2>
-                      </div>
-                      <p style="font-size: 13.5px; color: var(--text-secondary); line-height: 1.65;" x-text="selectedGraphNode.description"></p>
-                      <div style="padding: 12px 14px; border-radius: 8px; background: var(--bg-surface-2); border: 1px solid var(--border-subtle);">
-                        <div class="field-label" style="color: var(--cyan-text);">Key Takeaway</div>
-                        <p style="font-size: 12.5px; color: var(--text-primary);" x-text="selectedGraphNode.key_takeaway"></p>
-                      </div>
-                    </div>
-
-                    <button
-                      class="btn btn-primary btn-lg"
-                      style="width: 100%;"
-                      @click="activeTab = 'tutor'; tutorSubMode = 'chat'; sendTutorChatMessage(`Can you give me a clear breakdown and concrete example of '${selectedGraphNode.label}'?`)"
-                    >
-                      Ask AI Tutor About This Concept
-                    </button>
-                  </div>
-                </template>
-              </div>
-            </div>
-          </section>
-
-          <!-- ============================================================
-               VIEW 7: AI TUTOR (MULTI-TURN CHAT + GEMINI 3.8 LIVE VOICE/SCREEN)
-               ============================================================ -->
-          <section x-show="activeTab === 'tutor'" x-cloak>
-            <div class="section-header">
-              <div>
-                <div class="section-eyebrow">Personalized Coaching</div>
-                <h1 class="section-title">Interactive AI Tutor Studio</h1>
-                <p class="section-desc">Pair-study via multi-turn chat or real-time live voice &amp; screen sharing.</p>
-              </div>
-
-              <div class="pill-tabs">
-                <button
-                  class="pill-tab"
-                  :class="tutorSubMode === 'chat' ? 'is-active' : ''"
-                  @click="tutorSubMode = 'chat'"
-                >
-                  Chat &amp; Image Vision
-                </button>
-                <button
-                  class="pill-tab"
-                  :class="tutorSubMode === 'live' ? 'is-active' : ''"
-                  @click="tutorSubMode = 'live'"
-                >
-                  Live Voice &amp; Screen Share
-                </button>
-              </div>
-            </div>
-
-            <!-- SUB-MODE A: MULTI-TURN CHAT -->
-            <div x-show="tutorSubMode === 'chat'" class="surface-card chat-shell">
-              <div class="chat-topbar">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                  <span class="field-label" style="margin: 0;">Pedagogical Persona:</span>
-                  <select x-model="tutorPersona" class="select-field" style="width: auto; padding: 5px 10px; font-size: 12px;">
-                    <option value="socratic">Socratic Guide (Questions &amp; Intuition)</option>
-                    <option value="eli5">ELI5 (Zero-Jargon Analogies)</option>
-                    <option value="deep_dive">Graduate Deep Dive (Rigorous Proofs)</option>
-                    <option value="exam_coach">Exam Coach (High-Yield Patterns)</option>
-                  </select>
-                </div>
-
-                <button
-                  class="btn"
-                  style="padding: 5px 10px; font-size: 11.5px;"
-                  @click="lastInteractionId = null; chatMessages = [{role: 'assistant', content: 'Fresh session started! Which topic or problem should we explore?'}]"
-                >
-                  Reset Thread
-                </button>
-              </div>
-
-              <div id="tutorChatScroll" class="chat-messages">
-                <template x-for="(m, mIdx) in chatMessages" :key="mIdx">
-                  <div class="chat-bubble" :class="m.role === 'user' ? 'is-user' : 'is-assistant markdown-body'">
-                    <template x-if="m.imagePreview">
-                      <img :src="m.imagePreview" style="max-height: 180px; border-radius: 8px; margin-bottom: 8px; display: block;" />
-                    </template>
-                    <div x-html="m.role === 'user' ? m.content : renderMarkdown(m.content)"></div>
-                  </div>
-                </template>
-
-                <div x-show="isChatLoading" class="chat-bubble is-assistant" style="color: var(--accent-text);">
-                  Thinking through your question...
-                </div>
-              </div>
-
-              <div class="chat-input-bar">
-                <input type="file" accept="image/*" x-ref="chatImgInput" style="display: none;" @change="handleChatImageAttach($event)" />
-                <button class="btn" @click="$refs.chatImgInput.click()" title="Attach screenshot or photo of handwritten work">
-                  <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z"/>
-                  </svg>
-                  <span x-show="chatImageName" x-text="chatImageName" style="max-width: 100px; overflow: hidden; text-overflow: ellipsis;"></span>
-                </button>
-                <input
-                  type="text"
-                  x-model="chatInput"
-                  @keydown.enter.prevent="sendTutorChatMessage()"
-                  class="input-field"
-                  placeholder="Ask a question, request a Socratic quiz, or attach a screenshot of a problem..."
-                />
-                <button class="btn btn-primary" @click="sendTutorChatMessage()" :disabled="isChatLoading">
-                  Send
-                </button>
-              </div>
-            </div>
-
-            <!-- SUB-MODE B: GEMINI 3.8 LIVE VOICE & SCREEN -->
-            <div x-show="tutorSubMode === 'live'" class="surface-card" style="display: flex; flex-direction: column; gap: 20px; align-items: center; text-align: center; padding: 36px;">
-              <div
-                style="width: 76px; height: 76px; border-radius: 50%; display: flex; align-items: center; justify-content: center; background: var(--accent); color: #fff;"
-                :class="liveConnected ? 'live-orb-active' : ''"
-              >
-                <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"/>
-                </svg>
-              </div>
-
-              <div>
-                <h2 style="font-size: 19px; font-weight: 800; color: var(--text-primary);">Live Voice &amp; Screen Tutor</h2>
-                <p style="font-size: 13px; color: var(--cyan-text); margin-top: 4px;" x-text="liveStatusText"></p>
-              </div>
-
-              <div style="display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;">
-                <button
-                  class="btn btn-lg"
-                  :class="liveConnected ? 'btn-rose' : 'btn-primary'"
-                  @click="toggleLiveVoiceSession()"
-                  x-text="liveConnected ? 'End Live Voice Session' : 'Start Live Voice Session'"
-                ></button>
-
-                <button
-                  class="btn btn-lg"
-                  @click="toggleLiveScreenShare()"
-                  x-text="screenStream ? 'Stop Screen Share' : 'Share Screen with Tutor'"
-                ></button>
-              </div>
-
-              <video id="liveScreenPreview" x-show="screenStream" muted style="max-height: 200px; border-radius: 10px; border: 1px solid var(--cyan-border);"></video>
-
-              <div style="width: 100%; max-width: 700px; text-align: left;">
-                <div class="field-label">Real-Time Conversation Transcript</div>
-                <div style="height: 170px; overflow-y: auto; background: var(--bg-surface-2); border: 1px solid var(--border-subtle); border-radius: 10px; padding: 14px; display: flex; flex-direction: column; gap: 8px; font-size: 12.5px;">
-                  <template x-if="liveTranscripts.length === 0">
-                    <p style="color: var(--text-muted);">Start the live voice session and speak naturally, or type a message below...</p>
-                  </template>
-                  <template x-for="(t, tIdx) in liveTranscripts" :key="tIdx">
-                    <div>
-                      <strong :style="t.role === 'You' ? 'color:var(--accent-text)' : 'color:var(--cyan-text)'" x-text="`${t.role}: `"></strong>
-                      <span style="color: var(--text-primary);" x-text="t.text"></span>
-                    </div>
-                  </template>
-                </div>
-
-                <div x-show="liveConnected" style="display: flex; gap: 8px; margin-top: 10px;">
-                  <input
-                    type="text"
-                    x-model="liveTextDraft"
-                    @keydown.enter.prevent="sendLiveTextPrompt()"
-                    class="input-field"
-                    placeholder="Send a text note into the active live voice session..."
-                  />
-                  <button class="btn btn-cyan" @click="sendLiveTextPrompt()">Send</button>
-                </div>
-              </div>
-            </div>
-          </section>
-
-          <!-- ============================================================
-               VIEW 8: MODERNALITY INTERACTIVE PROBLEM SOLVER & WHITEBOARD
-               (Unified from sujaysun101/Modernality: Capture + Solution +
-                Guided Socratic Learning + Interactive Drawing Whiteboard)
-               ============================================================ -->
-          <section x-show="activeTab === 'workbench'" x-cloak>
-            <div class="section-header">
-              <div>
-                <div class="section-eyebrow">Interactive Problem Capture &amp; Whiteboard Studio</div>
-                <h1 class="section-title">Problem Solver, Guided Walkthrough &amp; Whiteboard</h1>
-                <p class="section-desc">
-                  Capture any problem from your screen, paste/drop an image, or type a question—then switch between Structured Solution, Guided Socratic Q&amp;A, and the Interactive Whiteboard.
-                </p>
-              </div>
-
-              <!-- 3-Mode Selector from sujaysun101/Modernality -->
-              <div class="pill-tabs">
-                <button
-                  class="pill-tab"
-                  :class="wbMode === 'solution' ? 'is-active' : ''"
-                  @click="switchWbMode('solution')"
-                >
-                  Solution Steps
-                </button>
-                <button
-                  class="pill-tab"
-                  :class="wbMode === 'guided' ? 'is-active' : ''"
-                  @click="switchWbMode('guided')"
-                >
-                  Guided Learning
-                </button>
-                <button
-                  class="pill-tab"
-                  :class="wbMode === 'learning' ? 'is-active' : ''"
-                  @click="switchWbMode('learning')"
-                >
-                  Interactive Whiteboard
-                </button>
-              </div>
-            </div>
-
-            <!-- Problem Capture & Input Bar -->
+          <!-- Progress Track -->
+          <div class="qz-progress-track">
             <div
-              class="surface-card"
-              style="margin-bottom: 18px; display: flex; flex-direction: column; gap: 14px;"
-              @dragover.prevent
-              @drop="handleWbImageDrop($event)"
-            >
-              <div style="display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;">
-                <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
-                  <button class="btn btn-primary" @click="captureScreenProblem()">
-                    <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
-                      <path stroke-linecap="round" stroke-linejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z"/>
-                    </svg>
-                    <span>Capture Screen</span>
-                  </button>
-
-                  <input type="file" accept="image/*" x-ref="wbImgInput" style="display: none;" @change="handleWbImageUpload($event)" />
-                  <button class="btn" @click="$refs.wbImgInput.click()">
-                    Load Image
-                  </button>
-
-                  <button class="btn" @click="pasteClipboardProblem()">
-                    Paste Clipboard
-                  </button>
-
-                  <button
-                    x-show="wbProblemImage"
-                    class="btn btn-rose"
-                    @click="wbProblemImage = null"
-                  >
-                    Clear Image
-                  </button>
-                </div>
-
-                <!-- Recent Captured Problems -->
-                <div x-show="wbRecentProblems.length > 0" style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
-                  <span style="font-size: 11px; color: var(--text-muted); font-weight: 600;">Recent:</span>
-                  <template x-for="rp in wbRecentProblems.slice(0, 3)" :key="rp.id">
-                    <button
-                      class="btn"
-                      style="padding: 4px 9px; font-size: 11px; max-width: 170px; overflow: hidden; text-overflow: ellipsis;"
-                      @click="selectRecentWbProblem(rp)"
-                      x-text="rp.label"
-                    ></button>
-                  </template>
-                </div>
-              </div>
-
-              <div class="grid-12" style="align-items: center;">
-                <div :class="wbProblemImage ? 'col-8' : 'col-12'">
-                  <div style="display: flex; gap: 10px;">
-                    <input
-                      type="text"
-                      x-model="wbProblemText"
-                      @keydown.enter.prevent="runWorkbenchMode(wbMode)"
-                      class="input-field"
-                      placeholder="Type or paste a problem here (e.g., 'Find the eigenvalues of A = [[2, 1], [1, 2]]' or 'Find acceleration if v₀ = 10 m/s, v = 25 m/s, t = 3 s')..."
-                    />
-                    <button
-                      class="btn btn-primary btn-lg"
-                      @click="runWorkbenchMode(wbMode)"
-                      :disabled="wbIsAnalyzing"
-                    >
-                      <span x-text="wbIsAnalyzing ? 'Analyzing...' : 'Analyze Problem →'"></span>
-                    </button>
-                  </div>
-                </div>
-
-                <template x-if="wbProblemImage">
-                  <div class="col-4" style="display: flex; align-items: center; gap: 10px; background: var(--bg-surface-2); padding: 8px 12px; border-radius: 8px; border: 1px solid var(--border-subtle);">
-                    <img :src="wbProblemImage" alt="Captured Problem" style="max-height: 64px; border-radius: 6px; object-fit: contain;" />
-                    <span style="font-size: 11.5px; color: var(--text-secondary);">Captured problem image attached</span>
-                  </div>
-                </template>
-              </div>
-            </div>
-
-            <!-- ==========================================================
-                 SUB-MODE 1: SOLUTION DISPLAY (Given / Find / Formula / Work / Answer)
-                 ========================================================== -->
-            <div x-show="wbMode === 'solution'">
-              <template x-if="!wbSolutionData && !wbIsAnalyzing">
-                <div class="surface-card" style="text-align: center; padding: 48px 24px;">
-                  <div style="font-size: 15px; font-weight: 700; color: var(--text-primary);">Ready for Step-by-Step Solution Breakdown</div>
-                  <p style="font-size: 13px; color: var(--text-secondary); max-width: 480px; margin: 6px auto 0 auto;">
-                    Capture a problem from your screen or enter one above to break it down into color-coded <strong>Given</strong>, <strong>Find</strong>, <strong>Formula</strong>, <strong>Work</strong>, and <strong>Answer</strong> steps.
-                  </p>
-                </div>
-              </template>
-
-              <template x-if="wbSolutionData">
-                <div class="surface-card">
-                  <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px solid var(--border-subtle);">
-                    <div>
-                      <span class="brand-badge" x-text="wbSolutionData.subject_tag || 'Problem Breakdown'"></span>
-                      <h3 style="font-size: 16px; font-weight: 700; color: var(--text-primary); margin-top: 6px;" x-text="wbSolutionData.problem_summary"></h3>
-                    </div>
-                    <button class="btn" @click="exportInteractiveSolution()">
-                      Export Solution (.txt)
-                    </button>
-                  </div>
-
-                  <div>
-                    <template x-for="(step, sIdx) in wbSolutionData.steps" :key="sIdx">
-                      <div class="solution-step-card" :class="`step-${step.type || 'work'}`">
-                        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;">
-                          <div style="flex: 1;">
-                            <span class="step-badge-pill" x-text="(step.type || 'Step').toUpperCase()"></span>
-                            <div class="markdown-body" style="font-size: 14.5px; color: var(--text-primary);" x-html="renderMarkdown(step.content)"></div>
-                            <p
-                              x-show="step.explanation"
-                              style="font-size: 12.5px; color: var(--text-secondary); font-style: italic; margin-top: 6px;"
-                              x-text="step.explanation"
-                            ></p>
-                          </div>
-                          <button
-                            class="btn"
-                            style="padding: 4px 9px; font-size: 11px;"
-                            @click="copySolutionStep(step, sIdx)"
-                            x-text="wbCopiedStepIdx === sIdx ? '✓ Copied' : 'Copy'"
-                          ></button>
-                        </div>
-                      </div>
-                    </template>
-                  </div>
-                </div>
-              </template>
-            </div>
-
-            <!-- ==========================================================
-                 SUB-MODE 2: GUIDED SOCRATIC LEARNING (Step Progress + Validation)
-                 ========================================================== -->
-            <div x-show="wbMode === 'guided'">
-              <div class="surface-card">
-                <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
-                  <div style="font-size: 13px; font-weight: 700; color: var(--text-primary);">
-                    Guided Socratic Walkthrough — Step <span x-text="wbGuidedStep"></span> of <span x-text="wbGuidedTotalSteps"></span>
-                  </div>
-                  <div style="display: flex; gap: 8px;">
-                    <button class="btn btn-amber" style="padding: 5px 10px; font-size: 11.5px;" @click="revealWbGuidedHint()">
-                      Reveal Hint
-                    </button>
-                    <button class="btn" style="padding: 5px 10px; font-size: 11.5px;" @click="runWorkbenchMode('guided')">
-                      Restart Guided Session
-                    </button>
-                  </div>
-                </div>
-
-                <!-- Step Progress Bar -->
-                <div class="guided-progress-track">
-                  <div class="guided-progress-fill" :style="`width: ${Math.min(100, (wbGuidedStep / wbGuidedTotalSteps) * 100)}%`"></div>
-                </div>
-
-                <div id="wbGuidedScroll" style="height: 360px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 12px; background: var(--bg-surface-2); border-radius: 10px; border: 1px solid var(--border-subtle);">
-                  <template x-if="wbGuidedHistory.length === 0 && !wbIsAnalyzing">
-                    <div style="margin: auto; text-align: center; color: var(--text-muted); font-size: 13px;">
-                      Click <strong>Analyze Problem →</strong> above to begin your step-by-step Socratic walkthrough.
-                    </div>
-                  </template>
-
-                  <template x-for="(msg, gIdx) in wbGuidedHistory" :key="gIdx">
-                    <div class="chat-bubble" :class="msg.role === 'user' ? 'is-user' : 'is-assistant markdown-body'">
-                      <template x-if="msg.role === 'ai' && msg.isCorrect !== undefined">
-                        <div style="margin-bottom: 6px; font-size: 11.5px; font-weight: 700;" :style="msg.isCorrect ? 'color: var(--success-text);' : 'color: var(--warning-text);'">
-                          <span x-text="msg.isCorrect ? '✓ Correct Step! Advancing...' : 'Let us reconsider this step...'"></span>
-                        </div>
-                      </template>
-                      <div x-html="msg.role === 'user' ? msg.content : renderMarkdown(msg.content)"></div>
-                    </div>
-                  </template>
-
-                  <div x-show="wbGuidedLoading || wbIsAnalyzing" class="chat-bubble is-assistant" style="color: var(--accent-text);">
-                    Evaluating your step...
-                  </div>
-                </div>
-
-                <div style="display: flex; gap: 8px; margin-top: 12px;">
-                  <button
-                    type="button"
-                    class="btn"
-                    :class="wbGuidedListening ? 'btn-rose' : ''"
-                    @click="toggleWbGuidedVoiceMic()"
-                    title="Speak your answer"
-                  >
-                    <span x-text="wbGuidedListening ? 'Listening...' : 'Mic'"></span>
-                  </button>
-                  <input
-                    type="text"
-                    x-model="wbGuidedInput"
-                    @keydown.enter.prevent="sendWbGuidedReply()"
-                    class="input-field"
-                    placeholder="Type your answer or next step for the tutor to check..."
-                  />
-                  <button class="btn btn-primary" @click="sendWbGuidedReply()" :disabled="wbGuidedLoading">
-                    Submit Step
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <!-- ==========================================================
-                 SUB-MODE 3: INTERACTIVE DRAWING WHITEBOARD & AI DEMO
-                 ========================================================== -->
-            <div x-show="wbMode === 'learning'">
-              <div class="whiteboard-shell">
-                <!-- Drawing & Demo Toolbar -->
-                <div class="wb-toolbar">
-                  <!-- Drawing Tools (Pen, Eraser, Circle, Rectangle, Arrow, Text) -->
-                  <div style="display: flex; flex-wrap: wrap; align-items: center; gap: 10px;">
-                    <div class="wb-tool-group">
-                      <button class="wb-tool-btn" :class="wbTool === 'pen' ? 'is-active' : ''" @click="wbTool = 'pen'">Pen</button>
-                      <button class="wb-tool-btn" :class="wbTool === 'eraser' ? 'is-active' : ''" @click="wbTool = 'eraser'">Eraser</button>
-                      <button class="wb-tool-btn" :class="wbTool === 'circle' ? 'is-active' : ''" @click="wbTool = 'circle'">Circle</button>
-                      <button class="wb-tool-btn" :class="wbTool === 'square' ? 'is-active' : ''" @click="wbTool = 'square'">Box</button>
-                      <button class="wb-tool-btn" :class="wbTool === 'arrow' ? 'is-active' : ''" @click="wbTool = 'arrow'">Arrow</button>
-                      <button class="wb-tool-btn" :class="wbTool === 'text' ? 'is-active' : ''" @click="wbTool = 'text'">Text</button>
-                    </div>
-
-                    <!-- Semantic Color Swatches -->
-                    <div style="display: flex; align-items: center; gap: 6px;">
-                      <template x-for="c in wbColors" :key="c.hex">
-                        <button
-                          class="wb-swatch"
-                          :class="wbColor === c.hex && wbTool !== 'eraser' ? 'is-active' : ''"
-                          :style="`background: ${c.hex};`"
-                          :title="c.label"
-                          @click="wbColor = c.hex; if (wbTool === 'eraser') wbTool = 'pen'"
-                        ></button>
-                      </template>
-                    </div>
-
-                    <!-- Stroke Sizes -->
-                    <div class="wb-tool-group">
-                      <template x-for="sz in [2, 4, 6, 8]" :key="sz">
-                        <button
-                          class="wb-tool-btn"
-                          :class="wbSize === sz ? 'is-active' : ''"
-                          @click="wbSize = sz"
-                          x-text="`${sz}px`"
-                        ></button>
-                      </template>
-                    </div>
-                  </div>
-
-                  <!-- Right Actions: Grid, Undo, Redo, Clear, AI Review -->
-                  <div style="display: flex; align-items: center; gap: 6px;">
-                    <button class="btn" style="padding: 5px 9px; font-size: 11.5px;" @click="wbShowGrid = !wbShowGrid; redrawWhiteboard()">
-                      <span x-text="wbShowGrid ? 'Grid: On' : 'Grid: Off'"></span>
-                    </button>
-                    <button class="btn" style="padding: 5px 9px; font-size: 11.5px;" @click="wbUndo()" :disabled="wbUndoStack.length === 0">Undo</button>
-                    <button class="btn" style="padding: 5px 9px; font-size: 11.5px;" @click="wbRedo()" :disabled="wbRedoStack.length === 0">Redo</button>
-                    <button class="btn btn-rose" style="padding: 5px 9px; font-size: 11.5px;" @click="wbClearCanvas()">Clear</button>
-                    <button class="btn btn-cyan" style="padding: 5px 10px; font-size: 11.5px;" @click="askTutorToReviewWhiteboard()">
-                      Review My Whiteboard →
-                    </button>
-                  </div>
-                </div>
-
-                <!-- Interactive HTML5 Canvas -->
-                <div class="wb-canvas-wrap">
-                  <canvas
-                    id="modernalityWhiteboardCanvas"
-                    style="width: 100%; height: 100%; display: block; cursor: crosshair;"
-                    @mousedown="wbPointerDown($event)"
-                    @mousemove="wbPointerMove($event)"
-                    @mouseup="wbPointerUp($event)"
-                  ></canvas>
-
-                  <!-- Current AI Demonstration Step Overlay -->
-                  <template x-if="wbDemoData?.steps?.length && wbDemoData.steps[wbDemoStepIndex]">
-                    <div style="position: absolute; bottom: 14px; left: 14px; right: 14px; padding: 14px 18px; border-radius: 10px; background: rgba(13, 16, 23, 0.92); border: 1px solid var(--border-strong); backdrop-filter: blur(10px);">
-                      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px;">
-                        <span class="slide-step-pill" x-text="`Whiteboard Demo • Step ${wbDemoStepIndex + 1} of ${wbDemoData.steps.length}`"></span>
-                        <span style="font-size: 11px; color: var(--text-muted); text-transform: uppercase;" x-text="wbDemoData.steps[wbDemoStepIndex].board_heading"></span>
-                      </div>
-                      <div class="markdown-body" style="font-size: 14.5px; color: var(--text-primary);" x-html="renderMarkdown(wbDemoData.steps[wbDemoStepIndex].board_equation_or_text)"></div>
-                      <p style="font-size: 12.5px; color: var(--cyan-text); font-style: italic; margin-top: 6px;" x-text="`“${wbDemoData.steps[wbDemoStepIndex].narration}”`"></p>
-                    </div>
-                  </template>
-                </div>
-
-                <!-- Whiteboard Demonstration Playback Bar -->
-                <div style="padding: 12px 18px; background: var(--bg-surface-2); border-top: 1px solid var(--border-subtle); display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px;">
-                  <div style="display: flex; align-items: center; gap: 8px;">
-                    <button class="btn" @click="stepWbDemo(-1)" :disabled="!wbDemoData?.steps?.length || wbDemoStepIndex === 0">
-                      ← Prev Step
-                    </button>
-                    <button class="btn btn-primary" @click="wbDemoData?.steps?.length ? toggleWbDemoPlayback() : runWorkbenchMode('learning')">
-                      <span x-text="!wbDemoData?.steps?.length ? 'Generate AI Whiteboard Demo' : (wbDemoPlaying ? 'Pause Demo' : 'Play Voice + Board Demo')"></span>
-                    </button>
-                    <button class="btn" @click="stepWbDemo(1)" :disabled="!wbDemoData?.steps?.length || wbDemoStepIndex >= (wbDemoData?.steps?.length || 1) - 1">
-                      Next Step →
-                    </button>
-                  </div>
-
-                  <div style="display: flex; align-items: center; gap: 8px;">
-                    <button class="btn" style="padding: 5px 10px; font-size: 11.5px;" @click="wbDemoMuted = !wbDemoMuted">
-                      <span x-text="wbDemoMuted ? 'Voice: Muted' : 'Voice: On'"></span>
-                    </button>
-                    <select x-model.number="wbDemoSpeed" class="select-field" style="width: auto; padding: 5px 10px; font-size: 12px;">
-                      <option :value="0.75">0.75x Speed</option>
-                      <option :value="1">1.0x Speed</option>
-                      <option :value="1.25">1.25x Speed</option>
-                      <option :value="1.5">1.5x Speed</option>
-                      <option :value="2">2.0x Speed</option>
-                    </select>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </section>
-
+              class="qz-progress-fill"
+              :style="`width: ${Math.round(((currentCardIndex + 1) / Math.max(1, (kit.flashcards || []).length)) * 100)}%`"
+            ></div>
+          </div>
         </div>
-      </main>
-    </div>
+      </template>
+
+      <!-- Signature Quizlet "Terms in this set (N)" Section -->
+      <div class="qz-terms-section">
+        <div class="qz-terms-header">
+          <h2 class="qz-terms-title" x-text="`Terms in this set (${filteredFlashcards.length})`"></h2>
+          <span style="font-size: 13px; color: var(--text-muted);">Click speaker to hear pronunciation</span>
+        </div>
+
+        <template x-for="(card, cIdx) in filteredFlashcards" :key="card.id || cIdx">
+          <div class="qz-term-row">
+            <div class="qz-term-front" x-html="renderMarkdown(card.front)"></div>
+            <div class="qz-term-divider"></div>
+            <div>
+              <div class="qz-term-back" x-html="renderMarkdown(card.back)"></div>
+              <template x-if="card.mnemonic_or_tip">
+                <div style="margin-top: 6px; font-size: 12.5px; color: var(--accent-gold-text); font-weight: 600;" x-text="`💡 ${card.mnemonic_or_tip}`"></div>
+              </template>
+            </div>
+            <div class="qz-term-actions">
+              <button
+                class="qz-btn qz-btn-icon"
+                style="width: 34px; height: 34px;"
+                @click="speakTextAloud(`${card.front}. ${card.back}`)"
+                title="Listen aloud"
+              >
+                <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path stroke-linecap="round" d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+        </template>
+      </div>
+    </section>
 
     <!-- ==================================================================
-         SETTINGS & ELEVENLABS LIVE VOICE MODAL
+         VIEW 2: LEARN (Quizlet Study Guide Modules + Interactive Steps)
          ================================================================== -->
-    <div x-show="showApiKeyModal" x-cloak class="modal-backdrop">
-      <div class="modal-card" @click.outside="showApiKeyModal = false">
-        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
-          <h3 style="font-size: 16px; font-weight: 800; color: var(--text-primary);">Modernality Settings & Live Voice</h3>
-          <button style="background:none; border:none; color:var(--text-muted); cursor:pointer; font-size:16px;" @click="showApiKeyModal = false">✕</button>
-        </div>
+    <section x-show="activeTab === 'lessons' && hasActiveKit" x-cloak>
+      <!-- Module Pills -->
+      <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px;">
+        <template x-for="(mod, mIdx) in (kit.lesson_modules || [])" :key="mIdx">
+          <button
+            class="qz-subject-pill"
+            :class="activeModuleIndex === mIdx ? 'is-active' : ''"
+            @click="activeModuleIndex = mIdx; $nextTick(() => typesetMath())"
+            x-text="`Module ${mod.module_number}: ${mod.title}`"
+          ></button>
+        </template>
+      </div>
 
-        <div style="margin-bottom: 14px;">
-          <label class="field-label" style="display: flex; align-items: center; justify-content: space-between;">
-            <span>Core Study & Reasoning Key</span>
-            <span style="font-size: 10.5px;" :style="apiKeyConfigured ? 'color: var(--emerald-text);' : 'color: var(--text-muted);'" x-text="apiKeyConfigured ? '✓ Connected' : 'Not set'"></span>
-          </label>
-          <input
-            type="password"
-            x-model="apiKeyInput"
-            @keydown.enter.prevent="saveApiKey()"
-            placeholder="Enter key (leave blank to keep current)..."
-            class="input-field font-mono"
-          />
-        </div>
+      <template x-if="currentModule">
+        <div style="display: grid; grid-template-columns: 2fr 1fr; gap: 20px; align-items: start;">
+          <div class="qz-card">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+              <span class="qz-badge qz-badge-indigo" x-text="`Module ${currentModule.module_number} • ${currentModule.difficulty}`"></span>
+              <span class="qz-badge" x-text="`${currentModule.duration_minutes} min read`"></span>
+            </div>
+            <h2 style="font-size: 23px; font-weight: 800; margin-bottom: 10px;" x-text="currentModule.title"></h2>
+            <p style="padding: 14px 16px; border-radius: 12px; background: var(--bg-subtle); color: var(--text-secondary); margin-bottom: 18px;" x-text="currentModule.summary"></p>
+            <div class="markdown-body" x-html="renderMarkdown(currentModule.core_concepts_markdown)"></div>
+          </div>
 
-        <div style="margin-bottom: 14px;">
-          <label class="field-label" style="display: flex; align-items: center; justify-content: space-between;">
-            <span>ElevenLabs Live Voice API Key</span>
-            <span style="font-size: 10.5px;" :style="elevenlabsConfigured ? 'color: var(--emerald-text);' : 'color: var(--text-muted);'" x-text="elevenlabsConfigured ? '✓ ElevenLabs Active' : 'Optional'"></span>
-          </label>
-          <input
-            type="password"
-            x-model="elevenlabsKeyInput"
-            @keydown.enter.prevent="saveApiKey()"
-            placeholder="xi-... or sk_... (ElevenLabs API Key)"
-            class="input-field font-mono"
-            style="margin-bottom: 10px;"
-          />
-          <label class="field-label">ElevenLabs Tutor Voice</label>
-          <select x-model="elevenlabsVoice" class="select-field">
-            <option value="Rachel">Rachel (Calm, Articulate Educator)</option>
-            <option value="Josh">Josh (Warm, Conversational Tutor)</option>
-            <option value="Bella">Bella (Expressive, Friendly Guide)</option>
-            <option value="Adam">Adam (Clear, University Lecturer)</option>
-            <option value="Antoni">Antoni (Energetic Exam Coach)</option>
+          <div style="display: flex; flex-direction: column; gap: 16px;">
+            <div class="qz-card">
+              <h3 style="font-size: 15px; font-weight: 800; margin-bottom: 10px; color: var(--brand-primary);">Learning Objectives</h3>
+              <ul style="list-style: none; display: flex; flex-direction: column; gap: 8px;">
+                <template x-for="(obj, oIdx) in currentModule.learning_objectives" :key="oIdx">
+                  <li style="display: flex; gap: 8px; font-size: 13.5px; color: var(--text-secondary);">
+                    <span style="color: var(--know-green); font-weight: 800;">✓</span>
+                    <span x-text="obj"></span>
+                  </li>
+                </template>
+              </ul>
+            </div>
+
+            <div class="qz-card" style="background: var(--accent-gold-soft);">
+              <h3 style="font-size: 14px; font-weight: 800; color: var(--accent-gold-text); margin-bottom: 6px;">💡 Real-World Analogy</h3>
+              <p style="font-size: 13.5px; color: var(--text-primary);" x-text="currentModule.real_world_analogy"></p>
+            </div>
+
+            <div class="qz-card">
+              <h3 style="font-size: 14px; font-weight: 800; color: var(--learning-coral); margin-bottom: 8px;">⚠️ Common Exam Pitfalls</h3>
+              <ul style="list-style: none; display: flex; flex-direction: column; gap: 8px;">
+                <template x-for="(pit, pIdx) in currentModule.common_pitfalls" :key="pIdx">
+                  <li style="font-size: 13px; color: var(--text-secondary); padding-left: 10px; border-left: 3px solid var(--learning-coral);" x-text="pit"></li>
+                </template>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </template>
+
+      <!-- Step-by-Step Guided Walkthroughs -->
+      <template x-if="(kit.guided_tutorial_steps || []).length > 0">
+        <div style="margin-top: 32px;">
+          <h3 style="font-size: 20px; font-weight: 800; margin-bottom: 14px;">Interactive Step-by-Step Checkpoints</h3>
+          <div style="display: flex; flex-direction: column; gap: 14px;">
+            <template x-for="(tStep, tIdx) in kit.guided_tutorial_steps" :key="tIdx">
+              <div class="qz-card">
+                <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+                  <span class="qz-badge qz-badge-indigo" x-text="`Step ${tStep.step_number}`"></span>
+                  <h4 style="font-size: 17px; font-weight: 800;" x-text="tStep.title"></h4>
+                </div>
+                <div class="markdown-body" style="color: var(--text-secondary); margin-bottom: 12px;" x-html="renderMarkdown(tStep.explanation)"></div>
+                <div style="padding: 14px 16px; border-radius: 12px; background: var(--bg-subtle); margin-bottom: 12px;" class="markdown-body" x-html="renderMarkdown(tStep.example_or_walkthrough)"></div>
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+                  <span style="font-size: 14px; font-weight: 700; color: var(--brand-primary);" x-text="`Quick Check: ${tStep.check_understanding_question}`"></span>
+                  <button class="qz-btn" style="padding: 6px 12px; font-size: 12.5px;" @click="toggleTutorialCheck(tStep.step_number)">
+                    <span x-text="revealedTutorialChecks[tStep.step_number] ? 'Hide Answer' : 'Reveal Answer'"></span>
+                  </button>
+                </div>
+                <div
+                  x-show="revealedTutorialChecks[tStep.step_number]"
+                  x-cloak
+                  style="margin-top: 10px; padding: 12px 14px; border-radius: 10px; background: var(--know-green-soft); color: var(--know-green); font-weight: 600; font-size: 14px;"
+                  x-html="renderMarkdown(tStep.check_understanding_answer)"
+                ></div>
+              </div>
+            </template>
+          </div>
+        </div>
+      </template>
+    </section>
+
+    <!-- ==================================================================
+         VIEW 3: TEST (Quizlet-Style Practice Questions & Grading)
+         ================================================================== -->
+    <section x-show="activeTab === 'practice' && hasActiveKit" x-cloak>
+      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 18px;">
+        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
+          <template x-for="(prob, pIdx) in (kit.practice_problems || [])" :key="prob.id || pIdx">
+            <button
+              class="qz-subject-pill"
+              :class="activeProblemIndex === pIdx ? 'is-active' : ''"
+              @click="selectProblem(pIdx)"
+              x-text="`Question ${pIdx + 1}`"
+            ></button>
+          </template>
+        </div>
+      </div>
+
+      <template x-if="currentProblem">
+        <div class="qz-card" style="max-width: 840px; margin: 0 auto;">
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-bottom: 16px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="qz-badge qz-badge-indigo" x-text="`Question ${activeProblemIndex + 1} of ${(kit.practice_problems || []).length}`"></span>
+              <span class="qz-badge" x-text="currentProblem.difficulty"></span>
+              <span class="qz-badge" x-text="currentProblem.topic_tag"></span>
+            </div>
+
+            <button
+              class="qz-btn"
+              style="padding: 7px 14px; font-size: 13px; color: var(--brand-primary); border-color: var(--brand-primary);"
+              @click="openPracticeProblemInWorkbench(currentProblem)"
+            >
+              Open in Interactive Whiteboard &amp; Solver →
+            </button>
+          </div>
+
+          <div style="font-size: 18px; font-weight: 700; margin-bottom: 22px;" class="markdown-body" x-html="renderMarkdown(currentProblem.question)"></div>
+
+          <!-- Multiple Choice Options -->
+          <template x-if="currentProblem.question_type === 'multiple_choice' && currentProblem.options?.length">
+            <div style="margin-bottom: 18px;">
+              <div class="qz-label" style="margin-bottom: 10px;">Choose matching answer</div>
+              <template x-for="(opt, oIdx) in currentProblem.options" :key="oIdx">
+                <button
+                  class="qz-option-btn"
+                  :class="selectedMcqOption === opt ? 'is-selected' : ''"
+                  @click="selectedMcqOption = opt"
+                >
+                  <span class="qz-option-key" x-text="['A','B','C','D'][oIdx] || (oIdx + 1)"></span>
+                  <span x-text="opt"></span>
+                </button>
+              </template>
+            </div>
+          </template>
+
+          <!-- Written / Reasoning Response -->
+          <div style="margin-bottom: 18px;">
+            <label class="qz-label" x-text="currentProblem.question_type === 'multiple_choice' ? 'Optional: Show your reasoning for partial credit feedback' : 'Your Answer'"></label>
+            <textarea
+              x-model="freeResponseDraft"
+              rows="4"
+              placeholder="Type your answer or steps here..."
+              class="qz-textarea"
+            ></textarea>
+          </div>
+
+          <!-- Action Bar -->
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <button
+                class="qz-btn"
+                @click="revealNextHint()"
+                :disabled="revealedHintsCount >= (currentProblem.hints?.length || 0)"
+              >
+                💡 Hint (<span x-text="`${revealedHintsCount}/${currentProblem.hints?.length || 0}`"></span>)
+              </button>
+              <button class="qz-btn" @click="showSolution = !showSolution; $nextTick(() => typesetMath())">
+                <span x-text="showSolution ? 'Hide Solution' : 'Show Solution'"></span>
+              </button>
+            </div>
+
+            <button class="qz-btn qz-btn-primary" @click="submitPracticeAnswer()" :disabled="isGrading">
+              <span x-text="isGrading ? 'Checking Answer...' : 'Check Answer'"></span>
+            </button>
+          </div>
+
+          <!-- Progressive Hints -->
+          <template x-if="revealedHintsCount > 0">
+            <div style="margin-top: 16px; display: flex; flex-direction: column; gap: 8px;">
+              <template x-for="(h, hIdx) in (currentProblem.hints || []).slice(0, revealedHintsCount)" :key="hIdx">
+                <div style="padding: 12px 16px; border-radius: 10px; background: var(--accent-gold-soft); color: var(--accent-gold-text); font-size: 14px; font-weight: 600;">
+                  <strong>Hint <span x-text="hIdx + 1"></span>:</strong> <span x-text="h"></span>
+                </div>
+              </template>
+            </div>
+          </template>
+
+          <!-- Grading Feedback -->
+          <template x-if="currentGradingResult">
+            <div style="margin-top: 20px; padding: 18px 20px; border-radius: 14px; border: 2px solid var(--brand-primary); background: var(--brand-primary-soft);">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                <span style="font-size: 16px; font-weight: 800;" x-text="currentGradingResult.verdict"></span>
+                <span class="qz-badge qz-badge-indigo" x-text="`Score: ${currentGradingResult.score}/100`"></span>
+              </div>
+              <div class="markdown-body" style="font-size: 14.5px;" x-html="renderMarkdown(currentGradingResult.personalized_feedback)"></div>
+            </div>
+          </template>
+
+          <!-- Step-by-Step Solution -->
+          <div x-show="showSolution" x-cloak style="margin-top: 20px; padding: 18px 20px; border-radius: 14px; background: var(--bg-subtle);">
+            <div class="qz-label" style="color: var(--know-green);">Correct Answer: <span x-text="currentProblem.correct_answer"></span></div>
+            <div class="markdown-body" style="margin-top: 8px;" x-html="renderMarkdown(currentProblem.step_by_step_solution)"></div>
+          </div>
+        </div>
+      </template>
+    </section>
+
+    <!-- ==================================================================
+         VIEW 4: BREAKDOWN EXPLAINER SLIDES & VOICEOVER
+         ================================================================== -->
+    <section x-show="activeTab === 'explainer' && hasActiveKit" x-cloak>
+      <template x-if="currentSlide">
+        <div class="qz-card">
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 18px;">
+            <div>
+              <span class="qz-badge qz-badge-indigo" x-text="`Slide ${currentSlide.slide_number} of ${(kit.explainer_slides || []).length}`"></span>
+              <h2 style="font-size: 24px; font-weight: 800; margin-top: 6px;" x-text="currentSlide.title"></h2>
+              <p style="color: var(--text-secondary); font-size: 14.5px;" x-text="currentSlide.subtitle"></p>
+            </div>
+
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <button class="qz-btn qz-btn-primary" @click="toggleSlidePlayback()">
+                <span x-text="isPlayingSlide ? '⏸ Pause Narration' : '▶ Play Narration'"></span>
+              </button>
+              <button
+                class="qz-btn"
+                @click="if (currentSlideIndex > 0) currentSlideIndex--"
+                :disabled="currentSlideIndex === 0"
+              >← Prev</button>
+              <button
+                class="qz-btn"
+                @click="if (currentSlideIndex < kit.explainer_slides.length - 1) currentSlideIndex++"
+                :disabled="currentSlideIndex >= (kit.explainer_slides?.length || 1) - 1"
+              >Next →</button>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1.2fr 1fr; gap: 20px; align-items: start;">
+            <div>
+              <ul style="list-style: none; display: flex; flex-direction: column; gap: 10px; margin-bottom: 16px;">
+                <template x-for="(b, bIdx) in currentSlide.bullets" :key="bIdx">
+                  <li style="padding: 12px 16px; border-radius: 12px; background: var(--bg-subtle); display: flex; gap: 12px; align-items: flex-start;">
+                    <span class="qz-badge qz-badge-indigo" x-text="bIdx + 1"></span>
+                    <span style="font-weight: 600;" x-html="renderMarkdown(b)"></span>
+                  </li>
+                </template>
+              </ul>
+
+              <template x-if="currentSlide.key_formula_or_code">
+                <div style="padding: 16px; border-radius: 12px; background: var(--bg-subtle); text-align: center; margin-bottom: 14px;" x-html="renderFormulaHtml(currentSlide.key_formula_or_code)"></div>
+              </template>
+
+              <div style="padding: 14px 18px; border-radius: 12px; border-left: 4px solid var(--brand-primary); background: var(--brand-primary-soft); font-style: italic; color: var(--text-primary);" x-text="`“${currentSlide.narration}”`"></div>
+            </div>
+
+            <div style="padding: 18px; border-radius: 14px; background: var(--bg-subtle); min-height: 260px; display: flex; flex-direction: column; align-items: center; justify-content: center;">
+              <template x-if="renderedMermaidSvg">
+                <div x-html="renderedMermaidSvg" style="width: 100%; overflow-x: auto; text-align: center;"></div>
+              </template>
+              <template x-if="!renderedMermaidSvg">
+                <span style="color: var(--text-muted); font-size: 13px;">Visual Concept Diagram</span>
+              </template>
+            </div>
+          </div>
+        </div>
+      </template>
+    </section>
+
+    <!-- ==================================================================
+         VIEW 5: AI TUTOR (1-on-1 Socratic Chat + Live ElevenLabs Voice)
+         ================================================================== -->
+    <section x-show="activeTab === 'tutor' && hasActiveKit" x-cloak>
+      <div class="qz-card" style="max-width: 860px; margin: 0 auto;">
+        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding-bottom: 16px; border-bottom: 1.5px solid var(--border-card); margin-bottom: 16px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <button
+              class="qz-subject-pill"
+              :class="tutorSubMode === 'chat' ? 'is-active' : ''"
+              @click="tutorSubMode = 'chat'"
+            >💬 Chat Tutor</button>
+            <button
+              class="qz-subject-pill"
+              :class="tutorSubMode === 'live' ? 'is-active' : ''"
+              @click="tutorSubMode = 'live'"
+            >🎙️ Live Voice Tutor</button>
+          </div>
+
+          <select x-show="tutorSubMode === 'chat'" x-model="tutorPersona" class="qz-select" style="width: auto; padding: 7px 14px; font-size: 13px;">
+            <option value="socratic">Socratic Guide</option>
+            <option value="eli5">Explain Simply (ELI5)</option>
+            <option value="deep_dive">Rigorous Deep Dive</option>
+            <option value="exam_coach">Exam Prep Coach</option>
           </select>
         </div>
 
-        <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
-          <button class="btn" @click="showApiKeyModal = false">Cancel</button>
-          <button class="btn btn-primary" @click="saveApiKey()">Save Settings</button>
+        <!-- Multi-Turn Chat Mode -->
+        <div x-show="tutorSubMode === 'chat'">
+          <div id="tutorChatContainer" style="max-height: 440px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; padding: 6px 2px 16px;">
+            <template x-for="(msg, mIdx) in chatMessages" :key="mIdx">
+              <div
+                style="padding: 14px 18px; border-radius: 14px; max-width: 85%;"
+                :style="msg.role === 'user'
+                  ? 'align-self: flex-end; background: var(--brand-primary); color: #ffffff;'
+                  : 'align-self: flex-start; background: var(--bg-subtle); color: var(--text-primary);'"
+              >
+                <div class="markdown-body" x-html="renderMarkdown(msg.content)"></div>
+              </div>
+            </template>
+            <div x-show="isChatLoading" style="font-size: 13.5px; color: var(--text-muted); font-weight: 600;">Thinking...</div>
+          </div>
+
+          <div style="display: flex; gap: 10px; margin-top: 12px;">
+            <input
+              type="text"
+              x-model="chatInput"
+              @keydown.enter.prevent="sendTutorChatMessage()"
+              placeholder="Ask a question about this study set..."
+              class="qz-input"
+            />
+            <button class="qz-btn qz-btn-primary" @click="sendTutorChatMessage()" :disabled="isChatLoading || !chatInput.trim()">
+              Send
+            </button>
+          </div>
+        </div>
+
+        <!-- Live ElevenLabs Voice & Screen Tutor Mode -->
+        <div x-show="tutorSubMode === 'live'" x-cloak style="text-align: center; padding: 24px 12px;">
+          <h3 style="font-size: 20px; font-weight: 800; margin-bottom: 6px;">Live Voice &amp; Screen Tutor</h3>
+          <p style="color: var(--text-secondary); font-size: 14px; margin-bottom: 20px;" x-text="liveStatusText"></p>
+
+          <div style="display: flex; justify-content: center; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
+            <button
+              class="qz-btn qz-btn-pill"
+              :class="liveConnected ? '' : 'qz-btn-primary'"
+              :style="liveConnected ? 'border-color: var(--learning-coral); color: var(--learning-coral);' : ''"
+              @click="toggleLiveVoiceSession()"
+            >
+              <span x-text="liveConnected ? '⏹ End Live Voice Session' : '🎙️ Start Live Voice Session'"></span>
+            </button>
+
+            <button class="qz-btn qz-btn-pill" @click="toggleLiveScreenShare()">
+              <span x-text="screenStream ? 'Stop Sharing Screen' : '🖥️ Share Screen'"></span>
+            </button>
+          </div>
+
+          <video id="liveScreenPreview" x-show="screenStream" autoplay muted playsinline style="max-width: 100%; max-height: 220px; border-radius: 12px; margin: 0 auto 16px; display: block;"></video>
+
+          <div style="max-height: 240px; overflow-y: auto; text-align: left; background: var(--bg-subtle); border-radius: 12px; padding: 14px;">
+            <template x-if="liveTranscripts.length === 0">
+              <div style="color: var(--text-muted); font-size: 13.5px; text-align: center;">Start a session and speak naturally — live transcript will appear here.</div>
+            </template>
+            <template x-for="(t, tIdx) in liveTranscripts" :key="tIdx">
+              <div style="margin-bottom: 8px; font-size: 14px;">
+                <strong style="color: var(--brand-primary);" x-text="`${t.role}: `"></strong>
+                <span x-text="t.text"></span>
+              </div>
+            </template>
+          </div>
         </div>
       </div>
-    </div>
+    </section>
 
-  </div>
+    <!-- ==================================================================
+         VIEW 6: INTERACTIVE PROBLEM SOLVER & WHITEBOARD WORKBENCH
+         (Combines sujaysun101/Modernality + Quizlet Clean Aesthetic)
+         ================================================================== -->
+    <section x-show="activeTab === 'workbench'" x-cloak>
+      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 14px; margin-bottom: 22px;">
+        <div>
+          <h1 class="qz-set-title" style="font-size: 26px;">Interactive Problem Solver &amp; Whiteboard</h1>
+          <p style="color: var(--text-secondary); font-size: 14.5px;">Capture any problem from your screen or paste an image — get step-by-step solutions, Socratic coaching, or a live narrated whiteboard demo.</p>
+        </div>
+
+        <!-- 3 Interactive Modes -->
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button
+            class="qz-subject-pill"
+            :class="wbMode === 'solution' ? 'is-active' : ''"
+            @click="switchWbMode('solution')"
+          >1. Solution Steps</button>
+          <button
+            class="qz-subject-pill"
+            :class="wbMode === 'guided' ? 'is-active' : ''"
+            @click="switchWbMode('guided')"
+          >2. Guided Socratic Mode</button>
+          <button
+            class="qz-subject-pill"
+            :class="wbMode === 'learning' ? 'is-active' : ''"
+            @click="switchWbMode('learning')"
+          >3. Interactive Whiteboard</button>
+        </div>
+      </div>
+
+      <div class="wb-layout">
+        <!-- Left Column: Problem Capture Card -->
+        <div class="qz-card">
+          <h3 style="font-size: 16px; font-weight: 800; margin-bottom: 12px;">Capture or Type Problem</h3>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px;">
+            <button class="qz-btn qz-btn-primary" style="padding: 9px 10px; font-size: 13px;" @click="captureScreenProblem()">
+              🖥️ Capture Screen
+            </button>
+            <button class="qz-btn" style="padding: 9px 10px; font-size: 13px;" @click="$refs.wbImageInput.click()">
+              🖼️ Upload Image
+            </button>
+            <input type="file" x-ref="wbImageInput" accept="image/*" style="display: none;" @change="handleWbImageUpload($event)" />
+          </div>
+
+          <button class="qz-btn" style="width: 100%; margin-bottom: 12px; font-size: 13px;" @click="pasteClipboardProblem()">
+            📋 Paste Image or Text from Clipboard
+          </button>
+
+          <template x-if="wbProblemImage">
+            <div style="position: relative; margin-bottom: 12px; border-radius: 10px; overflow: hidden; border: 1.5px solid var(--border-card);">
+              <img :src="wbProblemImage" alt="Captured Problem" style="width: 100%; max-height: 180px; object-fit: contain; display: block; background: #000;" />
+              <button
+                class="qz-btn"
+                style="position: absolute; top: 6px; right: 6px; padding: 3px 8px; font-size: 11px;"
+                @click="wbProblemImage = null"
+              >✕ Remove</button>
+            </div>
+          </template>
+
+          <label class="qz-label">Problem Statement / Equations</label>
+          <textarea
+            x-model="wbProblemText"
+            rows="4"
+            placeholder="Paste or type your math, physics, chemistry, or coding problem here..."
+            class="qz-textarea"
+            style="margin-bottom: 12px;"
+          ></textarea>
+
+          <button
+            class="qz-btn qz-btn-primary"
+            style="width: 100%;"
+            @click="runWorkbenchMode(wbMode)"
+            :disabled="wbIsAnalyzing || (!wbProblemText.trim() && !wbProblemImage)"
+          >
+            <span x-text="wbIsAnalyzing ? 'Analyzing Problem...' : (wbMode === 'solution' ? 'Solve Step-by-Step' : (wbMode === 'guided' ? 'Start Guided Coaching' : 'Generate Whiteboard Demo'))"></span>
+          </button>
+
+          <!-- Recent Problems -->
+          <template x-if="wbRecentProblems.length > 0">
+            <div style="margin-top: 18px; padding-top: 14px; border-top: 1.5px solid var(--border-card);">
+              <div class="qz-label">Recent Problems</div>
+              <div style="display: flex; flex-direction: column; gap: 6px;">
+                <template x-for="(rp, rIdx) in wbRecentProblems.slice(0, 4)" :key="rp.id || rIdx">
+                  <button
+                    class="qz-btn"
+                    style="justify-content: space-between; font-size: 12.5px; padding: 7px 10px;"
+                    @click="selectRecentWbProblem(rp)"
+                  >
+                    <span style="overflow: hidden; text-overflow: ellipsis; max-width: 200px;" x-text="rp.label"></span>
+                    <span style="color: var(--text-muted); font-size: 11px;" x-text="rp.timestamp"></span>
+                  </button>
+                </template>
+              </div>
+            </div>
+          </template>
+        </div>
+
+        <!-- Right Column: Active Mode Workspace -->
+        <div>
+          <!-- MODE 1: COLOR-CODED SOLUTION STEPS -->
+          <div x-show="wbMode === 'solution'">
+            <template x-if="!wbSolutionData && !wbIsAnalyzing">
+              <div class="qz-card" style="text-align: center; padding: 56px 24px;">
+                <h3 style="font-size: 19px; font-weight: 800; margin-bottom: 6px;">Ready to Break Down Your Problem</h3>
+                <p style="color: var(--text-secondary); max-width: 440px; margin: 0 auto;">Capture your screen, paste an image, or type a problem on the left and click <strong>Solve Step-by-Step</strong> to see color-coded Given, Formula, Work, and Answer cards.</p>
+              </div>
+            </template>
+
+            <template x-if="wbIsAnalyzing">
+              <div class="qz-card" style="text-align: center; padding: 56px 24px;">
+                <div class="qz-spinner" style="margin: 0 auto 12px;"></div>
+                <div style="font-weight: 700;">Synthesizing step-by-step solution...</div>
+              </div>
+            </template>
+
+            <template x-if="wbSolutionData && !wbIsAnalyzing">
+              <div>
+                <div class="qz-card" style="margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+                  <div>
+                    <span class="qz-badge qz-badge-indigo" x-text="wbSolutionData.subject_tag || 'Problem Breakdown'"></span>
+                    <div style="font-weight: 700; margin-top: 4px;" x-text="wbSolutionData.problem_summary"></div>
+                  </div>
+                  <button class="qz-btn" style="padding: 6px 12px; font-size: 12.5px;" @click="exportInteractiveSolution()">
+                    Export .txt
+                  </button>
+                </div>
+
+                <template x-for="(step, sIdx) in (wbSolutionData.steps || [])" :key="sIdx">
+                  <div class="wb-step-card" :class="`type-${step.type || 'work'}`">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                      <span class="qz-badge" style="text-transform: uppercase;" x-text="`Step ${sIdx + 1} • ${step.type || 'work'}`"></span>
+                      <button class="qz-btn" style="padding: 3px 9px; font-size: 11.5px;" @click="copySolutionStep(step, sIdx)">
+                        <span x-text="wbCopiedStepIdx === sIdx ? '✓ Copied' : 'Copy'"></span>
+                      </button>
+                    </div>
+                    <div class="markdown-body" style="font-size: 15.5px; font-weight: 600;" x-html="renderMarkdown(step.content)"></div>
+                    <template x-if="step.explanation">
+                      <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-card); font-size: 13.5px; color: var(--text-secondary);" x-html="renderMarkdown(step.explanation)"></div>
+                    </template>
+                  </div>
+                </template>
+              </div>
+            </template>
+          </div>
+
+          <!-- MODE 2: GUIDED SOCRATIC LEARNING -->
+          <div x-show="wbMode === 'guided'" x-cloak>
+            <div class="qz-card">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
+                <div>
+                  <h3 style="font-size: 17px; font-weight: 800;">Guided Step-by-Step Coaching</h3>
+                  <span style="font-size: 13px; color: var(--text-secondary);" x-text="`Progress: Step ${wbGuidedStep} of ${wbGuidedTotalSteps}`"></span>
+                </div>
+                <div style="display: flex; gap: 8px;">
+                  <button class="qz-btn" style="padding: 6px 12px; font-size: 12.5px;" @click="revealWbGuidedHint()">💡 Hint</button>
+                  <button class="qz-btn" style="padding: 6px 12px; font-size: 12.5px;" @click="runWorkbenchMode('guided')">Restart</button>
+                </div>
+              </div>
+
+              <div class="qz-progress-track" style="margin-bottom: 16px;">
+                <div class="qz-progress-fill" :style="`width: ${Math.min(100, Math.round((wbGuidedStep / wbGuidedTotalSteps) * 100))}%`"></div>
+              </div>
+
+              <div id="wbGuidedScroll" style="max-height: 360px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px;">
+                <template x-if="wbGuidedHistory.length === 0">
+                  <div style="text-align: center; padding: 36px 16px; color: var(--text-muted);">
+                    Click <strong>Start Guided Coaching</strong> on the left to work through this problem step-by-step without spoiling the final answer.
+                  </div>
+                </template>
+
+                <template x-for="(gm, gIdx) in wbGuidedHistory" :key="gIdx">
+                  <div
+                    style="padding: 13px 16px; border-radius: 12px; max-width: 88%;"
+                    :style="gm.role === 'user'
+                      ? 'align-self: flex-end; background: var(--brand-primary); color: #ffffff;'
+                      : 'align-self: flex-start; background: var(--bg-subtle); color: var(--text-primary);'"
+                  >
+                    <template x-if="gm.isCorrect !== undefined && gm.role === 'ai'">
+                      <div style="margin-bottom: 4px;">
+                        <span
+                          class="qz-badge"
+                          :class="gm.isCorrect ? 'qz-badge-green' : 'qz-badge-coral'"
+                          x-text="gm.isCorrect ? '✓ Correct step!' : 'Let’s reconsider...'"
+                        ></span>
+                      </div>
+                    </template>
+                    <div class="markdown-body" x-html="renderMarkdown(gm.content)"></div>
+                  </div>
+                </template>
+              </div>
+
+              <div style="display: flex; gap: 8px;">
+                <button class="qz-btn" @click="toggleWbGuidedVoiceMic()" :title="wbGuidedListening ? 'Stop voice input' : 'Speak your answer'">
+                  <span x-text="wbGuidedListening ? '🔴' : '🎙️'"></span>
+                </button>
+                <input
+                  type="text"
+                  x-model="wbGuidedInput"
+                  @keydown.enter.prevent="sendWbGuidedReply()"
+                  placeholder="Type your step or answer..."
+                  class="qz-input"
+                />
+                <button class="qz-btn qz-btn-primary" @click="sendWbGuidedReply()" :disabled="wbGuidedLoading || !wbGuidedInput.trim()">
+                  Submit Step
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- MODE 3: INTERACTIVE DRAWING WHITEBOARD + LIVE VOICE DEMO -->
+          <div x-show="wbMode === 'learning'" x-cloak>
+            <div class="qz-card" style="padding: 16px;">
+              <!-- Drawing Tools Bar -->
+              <div class="wb-toolbar">
+                <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                  <button class="qz-btn" style="padding: 5px 10px; font-size: 12px;" :class="wbTool === 'pen' ? 'qz-btn-primary' : ''" @click="wbTool = 'pen'">✏️ Pen</button>
+                  <button class="qz-btn" style="padding: 5px 10px; font-size: 12px;" :class="wbTool === 'eraser' ? 'qz-btn-primary' : ''" @click="wbTool = 'eraser'">🧽 Eraser</button>
+                  <button class="qz-btn" style="padding: 5px 10px; font-size: 12px;" :class="wbTool === 'circle' ? 'qz-btn-primary' : ''" @click="wbTool = 'circle'">◯ Circle</button>
+                  <button class="qz-btn" style="padding: 5px 10px; font-size: 12px;" :class="wbTool === 'square' ? 'qz-btn-primary' : ''" @click="wbTool = 'square'">▢ Box</button>
+                  <button class="qz-btn" style="padding: 5px 10px; font-size: 12px;" :class="wbTool === 'arrow' ? 'qz-btn-primary' : ''" @click="wbTool = 'arrow'">↗ Arrow</button>
+                  <button class="qz-btn" style="padding: 5px 10px; font-size: 12px;" :class="wbTool === 'text' ? 'qz-btn-primary' : ''" @click="wbTool = 'text'">T Text</button>
+                </div>
+
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <template x-for="c in wbColors" :key="c.hex">
+                    <button
+                      class="wb-color-swatch"
+                      :class="wbColor === c.hex ? 'is-active' : ''"
+                      :style="`background: ${c.hex};`"
+                      @click="wbColor = c.hex; if (wbTool === 'eraser') wbTool = 'pen';"
+                      :title="c.label"
+                    ></button>
+                  </template>
+                </div>
+
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <button class="qz-btn" style="padding: 5px 9px; font-size: 12px;" @click="wbUndo()" :disabled="wbUndoStack.length === 0">Undo</button>
+                  <button class="qz-btn" style="padding: 5px 9px; font-size: 12px;" @click="wbClearCanvas()">Clear</button>
+                  <button class="qz-btn qz-btn-primary" style="padding: 5px 11px; font-size: 12px;" @click="askTutorToReviewWhiteboard()">
+                    Review My Work →
+                  </button>
+                </div>
+              </div>
+
+              <!-- HTML5 Whiteboard Canvas -->
+              <div class="wb-canvas-box">
+                <canvas
+                  id="modernalityWhiteboardCanvas"
+                  style="width: 100%; height: 100%; display: block; cursor: crosshair;"
+                  @mousedown="wbPointerDown($event)"
+                  @mousemove="wbPointerMove($event)"
+                  @mouseup="wbPointerUp($event)"
+                ></canvas>
+
+                <template x-if="wbDemoData?.steps?.length && wbDemoData.steps[wbDemoStepIndex]">
+                  <div style="position: absolute; bottom: 12px; left: 12px; right: 12px; padding: 14px 18px; border-radius: 12px; background: rgba(15, 20, 35, 0.92); color: #ffffff; border: 1px solid rgba(255,255,255,0.16);">
+                    <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; font-size: 12px; color: #93c5fd; font-weight: 700;">
+                      <span x-text="`Whiteboard Demo • Step ${wbDemoStepIndex + 1} of ${wbDemoData.steps.length}`"></span>
+                      <span x-text="wbDemoData.steps[wbDemoStepIndex].board_heading"></span>
+                    </div>
+                    <div class="markdown-body" style="color: #ffffff; font-size: 15px;" x-html="renderMarkdown(wbDemoData.steps[wbDemoStepIndex].board_equation_or_text)"></div>
+                    <div style="font-size: 13px; color: #cbd5e1; font-style: italic; margin-top: 4px;" x-text="`“${wbDemoData.steps[wbDemoStepIndex].narration}”`"></div>
+                  </div>
+                </template>
+              </div>
+
+              <!-- Whiteboard Demo Playback Controls -->
+              <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; margin-top: 12px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <button class="qz-btn" @click="stepWbDemo(-1)" :disabled="!wbDemoData?.steps?.length || wbDemoStepIndex === 0">← Prev</button>
+                  <button class="qz-btn qz-btn-primary" @click="wbDemoData?.steps?.length ? toggleWbDemoPlayback() : runWorkbenchMode('learning')">
+                    <span x-text="!wbDemoData?.steps?.length ? '▶ Generate AI Whiteboard Demo' : (wbDemoPlaying ? '⏸ Pause Demo' : '▶ Play Voice + Board Demo')"></span>
+                  </button>
+                  <button class="qz-btn" @click="stepWbDemo(1)" :disabled="!wbDemoData?.steps?.length || wbDemoStepIndex >= (wbDemoData?.steps?.length || 1) - 1">Next →</button>
+                </div>
+
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <button class="qz-btn" style="padding: 6px 12px; font-size: 12.5px;" @click="wbDemoMuted = !wbDemoMuted">
+                    <span x-text="wbDemoMuted ? '🔇 Voice Muted' : '🔊 Voice On'"></span>
+                  </button>
+                  <select x-model.number="wbDemoSpeed" class="qz-select" style="width: auto; padding: 6px 10px; font-size: 12.5px;">
+                    <option :value="0.75">0.75x</option>
+                    <option :value="1">1.0x</option>
+                    <option :value="1.25">1.25x</option>
+                    <option :value="1.5">1.5x</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ==================================================================
+         VIEW 7: YOUR LIBRARY & CREATE A NEW STUDY SET (Quizlet Home/Create)
+         ================================================================== -->
+    <section x-show="activeTab === 'ingest'" x-cloak>
+
+      <!-- Subject Folders Filter Bar -->
+      <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 12px;">
+        <h2 style="font-size: 22px; font-weight: 800;">Your Study Library</h2>
+        <button class="qz-btn" style="padding: 6px 14px; font-size: 13px;" @click="showNewSubjectInput = !showNewSubjectInput">
+          + New Subject Folder
+        </button>
+      </div>
+
+      <!-- New Subject Input Row -->
+      <div x-show="showNewSubjectInput" x-cloak style="display: flex; gap: 8px; max-width: 420px; margin-bottom: 16px;">
+        <input
+          type="text"
+          x-model="newSubjectDraft"
+          @keydown.enter.prevent="createSubjectFolder()"
+          placeholder="Subject name (e.g. Organic Chemistry, Calculus III)..."
+          class="qz-input"
+        />
+        <button class="qz-btn qz-btn-primary" @click="createSubjectFolder()">Add</button>
+      </div>
+
+      <!-- Subject Pills -->
+      <div class="qz-subject-bar">
+        <button
+          class="qz-subject-pill"
+          :class="selectedSubjectFilter === 'ALL' ? 'is-active' : ''"
+          @click="selectSubjectFilter('ALL')"
+        >
+          All Subjects (<span x-text="kitsList.length"></span>)
+        </button>
+
+        <template x-for="subj in allSubjects" :key="subj">
+          <button
+            class="qz-subject-pill"
+            :class="selectedSubjectFilter.toLowerCase() === subj.toLowerCase() ? 'is-active' : ''"
+            @click="selectSubjectFilter(subj)"
+            x-text="subj"
+          ></button>
+        </template>
+      </div>
+
+      <!-- Existing Study Sets Grid (Quizlet Set Cards) -->
+      <template x-if="filteredKitsList.length > 0">
+        <div class="qz-sets-grid">
+          <template x-for="item in filteredKitsList" :key="item.id">
+            <div
+              class="qz-set-card"
+              :class="currentKitId === item.id ? 'is-selected' : ''"
+              @click="loadStudyKit(item.id); activeTab = 'flashcards'"
+            >
+              <div>
+                <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 10px;">
+                  <span class="qz-badge qz-badge-indigo" x-text="item.subject_area || 'General'"></span>
+                  <span class="qz-badge" x-text="`${item.flashcard_count || 0} terms`"></span>
+                </div>
+                <h3 style="font-size: 18px; font-weight: 800; color: var(--text-primary); margin-bottom: 6px;" x-text="item.title"></h3>
+              </div>
+
+              <div style="display: flex; align-items: center; justify-content: space-between; font-size: 12.5px; color: var(--text-muted); font-weight: 600;">
+                <span x-text="`${item.module_count || 0} modules • ${item.problem_count || 0} test questions`"></span>
+                <span style="color: var(--brand-primary); font-weight: 800;">Study →</span>
+              </div>
+            </div>
+          </template>
+        </div>
+      </template>
+
+      <!-- Quizlet-Style "Create a New Study Set" Card -->
+      <div class="qz-card">
+        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 18px;">
+          <div>
+            <h2 style="font-size: 22px; font-weight: 800;" x-text="ingestMode === 'append_kit' && hasActiveKit ? `Add Materials to “${kit.title}”` : 'Create a New Study Set'"></h2>
+            <p style="color: var(--text-secondary); font-size: 14px;">Upload lecture slides, PDFs, notes, images, or links to generate flashcards, practice tests, and study guides.</p>
+          </div>
+
+          <template x-if="hasActiveKit">
+            <div style="display: flex; gap: 6px;">
+              <button
+                class="qz-subject-pill"
+                :class="ingestMode === 'new_kit' ? 'is-active' : ''"
+                @click="ingestMode = 'new_kit'"
+              >New Study Set</button>
+              <button
+                class="qz-subject-pill"
+                :class="ingestMode === 'append_kit' ? 'is-active' : ''"
+                @click="ingestMode = 'append_kit'; ingestSubjectName = kit.subject_area || ''"
+              >Add to Current Set</button>
+            </div>
+          </template>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 18px;">
+          <div>
+            <label class="qz-label">Subject Folder</label>
+            <input
+              type="text"
+              x-model="ingestSubjectName"
+              list="modernalitySubjectsDatalist"
+              placeholder="e.g., Biology 101, Calculus III, Algorithms..."
+              class="qz-input"
+            />
+            <datalist id="modernalitySubjectsDatalist">
+              <template x-for="subj in allSubjects" :key="subj">
+                <option :value="subj"></option>
+              </template>
+            </datalist>
+          </div>
+
+          <div>
+            <label class="qz-label">Study Goal or Exam Focus (Optional)</label>
+            <input
+              type="text"
+              x-model="customFocus"
+              placeholder="e.g., Midterm 2 review, key derivations & definitions..."
+              class="qz-input"
+            />
+          </div>
+        </div>
+
+        <!-- Drag & Drop Upload Box -->
+        <div
+          class="qz-dropzone"
+          style="margin-bottom: 18px;"
+          @click="$refs.fileInput.click()"
+          @dragover.prevent
+          @drop.prevent="handleFileDrop($event)"
+        >
+          <input type="file" x-ref="fileInput" multiple style="display: none;" @change="handleFileSelect($event)" />
+          <div style="font-size: 16px; font-weight: 800; color: var(--brand-primary); margin-bottom: 4px;">
+            + Click or drag files here to upload
+          </div>
+          <div style="font-size: 13px; color: var(--text-secondary);">
+            Supports PDF, Word (.docx), PowerPoint (.pptx), Excel/CSV, ZIP, Images, Audio/Video, Jupyter (.ipynb), and Code
+          </div>
+        </div>
+
+        <!-- Selected Files Pills -->
+        <template x-if="selectedFiles.length > 0">
+          <div style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 18px;">
+            <template x-for="(file, fIdx) in selectedFiles" :key="fIdx">
+              <span class="qz-badge qz-badge-indigo" style="padding: 6px 12px; font-size: 13px;">
+                <span x-text="file.name"></span>
+                <button style="background:none; border:none; color:inherit; cursor:pointer; font-weight:800; margin-left:6px;" @click="removeFile(fIdx)">✕</button>
+              </span>
+            </template>
+          </div>
+        </template>
+
+        <!-- Links + Pasted Notes -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 20px;">
+          <div>
+            <label class="qz-label">Add YouTube, Google Drive, or Web Link</label>
+            <div style="display: flex; gap: 8px;">
+              <input
+                type="url"
+                x-model="urlInput"
+                @keydown.enter.prevent="addUrl()"
+                placeholder="https://www.youtube.com/watch?v=..."
+                class="qz-input"
+              />
+              <button class="qz-btn" @click="addUrl()">Add</button>
+            </div>
+            <div style="display: flex; flex-direction: column; gap: 6px; margin-top: 8px;">
+              <template x-for="(u, uIdx) in addedUrls" :key="uIdx">
+                <div class="qz-badge" style="justify-content: space-between; padding: 6px 10px;">
+                  <span style="overflow: hidden; text-overflow: ellipsis; max-width: 260px;" x-text="u"></span>
+                  <button style="background:none; border:none; cursor:pointer; font-weight:800;" @click="removeUrl(uIdx)">✕</button>
+                </div>
+              </template>
+            </div>
+          </div>
+
+          <div>
+            <label class="qz-label">Or Paste Notes, Syllabus, or Terms</label>
+            <textarea
+              x-model="rawNotes"
+              rows="3"
+              placeholder="Paste lecture notes, vocabulary terms, or formulas here..."
+              class="qz-textarea"
+            ></textarea>
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: flex-end;">
+          <button
+            class="qz-btn qz-btn-primary qz-btn-pill"
+            style="padding: 12px 28px; font-size: 15px;"
+            @click="synthesizeCourse()"
+            :disabled="isSynthesizing"
+          >
+            <template x-if="isSynthesizing">
+              <span class="qz-spinner" style="width: 16px; height: 16px; border-width: 2px; border-top-color: #fff;"></span>
+            </template>
+            <span x-text="isSynthesizing ? (synthesisStepText || 'Building Study Set...') : (ingestMode === 'append_kit' && hasActiveKit ? 'Update Study Set' : 'Create Study Set')"></span>
+          </button>
+        </div>
+      </div>
+
+    </section>
+
+  </main>
+
 </body>
 </html>

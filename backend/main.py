@@ -83,11 +83,16 @@ gcp_backend = GoogleCloudBackend(
 )
 gemini_service = GeminiTutorService(media_dir=MEDIA_DIR)
 
-# If GEMINI_API_KEY is not in env, attempt to load from Google Cloud Secret Manager
+# If GEMINI_API_KEY or ELEVENLABS_API_KEY is not in env, attempt to load from Google Cloud Secret Manager
 if not gemini_service.has_api_key():
     secret_key = gcp_backend.fetch_secret_api_key()
     if secret_key:
         gemini_service.set_api_key(secret_key)
+
+if not gemini_service.has_elevenlabs_key():
+    el_secret_key = gcp_backend.fetch_secret_elevenlabs_key()
+    if el_secret_key:
+        gemini_service.set_elevenlabs_key(el_secret_key)
 
 # In-memory registry synced with Cloud Firestore + Local Disk
 STUDY_KITS: Dict[str, Dict[str, Any]] = {}
@@ -258,14 +263,15 @@ async def configure_api_key(req: ApiKeyRequest) -> Dict[str, Any]:
 
 @app.post("/api/tts/elevenlabs")
 async def synthesize_elevenlabs_endpoint(req: ElevenLabsTtsRequest) -> Dict[str, Any]:
-    """Synthesizes live natural speech using the ElevenLabs API for Whiteboard Demos and Live Voice."""
-    if not gemini_service.has_elevenlabs_key():
-        raise HTTPException(
-            status_code=400,
-            detail="ElevenLabs API key is not configured. Open Settings to add your ElevenLabs API Key.",
-        )
+    """Synthesizes live natural speech using the ElevenLabs API (loaded from .env or Secret Manager)."""
     if not req.text or not req.text.strip():
         raise HTTPException(status_code=400, detail="Text is required for speech synthesis.")
+    if not gemini_service.has_elevenlabs_key():
+        el_secret = await asyncio.to_thread(gcp_backend.fetch_secret_elevenlabs_key)
+        if el_secret:
+            gemini_service.set_elevenlabs_key(el_secret)
+    if not gemini_service.has_elevenlabs_key():
+        raise HTTPException(status_code=400, detail="ElevenLabs secret not yet loaded.")
     try:
         mp3_bytes = await asyncio.to_thread(
             gemini_service.synthesize_elevenlabs_mp3,
