@@ -230,6 +230,8 @@ document.addEventListener('alpine:init', () => {
       this.$watch('activeTab', (newTab) => {
         if (newTab === 'explainer') {
           this.$nextTick(() => this.renderCurrentSlideVisuals());
+        } else if (newTab === 'voice') {
+          this.tutorSubMode = 'live';
         } else if (newTab === 'graph') {
           this.$nextTick(() => this.initConceptGraphCanvas());
         } else if (newTab === 'workbench') {
@@ -237,7 +239,7 @@ document.addEventListener('alpine:init', () => {
             if (this.wbMode === 'learning') this.initWhiteboardCanvas();
             this.typesetMath();
           });
-        } else if (newTab === 'lessons' || newTab === 'practice' || newTab === 'tutorials') {
+        } else if (newTab === 'lessons' || newTab === 'practice' || newTab === 'tutorials' || newTab === 'tutor') {
           this.$nextTick(() => this.typesetMath());
         }
       });
@@ -1622,7 +1624,7 @@ document.addEventListener('alpine:init', () => {
         this.screenStream = await navigator.mediaDevices.getDisplayMedia({
           video: { frameRate: 2 },
         });
-        const videoEl = document.getElementById('liveScreenPreview');
+        const videoEl = document.getElementById('liveScreenPreviewVoice') || document.getElementById('liveScreenPreview');
         if (videoEl) {
           videoEl.srcObject = this.screenStream;
           videoEl.play();
@@ -1631,7 +1633,7 @@ document.addEventListener('alpine:init', () => {
         const ctx = offCanvas.getContext('2d');
 
         this.screenIntervalId = setInterval(() => {
-          if (!this.liveConnected || !this.screenStream || !videoEl.videoWidth) return;
+          if (!this.liveConnected || !this.screenStream || !videoEl || !videoEl.videoWidth) return;
           offCanvas.width = Math.min(1024, videoEl.videoWidth);
           offCanvas.height = Math.round(
             (offCanvas.width / videoEl.videoWidth) * videoEl.videoHeight
