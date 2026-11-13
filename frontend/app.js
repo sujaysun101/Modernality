@@ -343,6 +343,41 @@ document.addEventListener('alpine:init', () => {
       this.isCardFlipped = !this.isCardFlipped;
     },
 
+    async safeReadJson(res, defaultErrorMsg = 'Request failed') {
+      let text = '';
+      try {
+        text = await res.text();
+      } catch (_) {
+        throw new Error(`${defaultErrorMsg}: network or stream error`);
+      }
+
+      let parsed = null;
+      try {
+        parsed = JSON.parse(text);
+      } catch (_) {
+        if (!res.ok) {
+          if (res.status === 413) {
+            throw new Error('Upload payload exceeds the maximum allowed server size limit.');
+          }
+          if (res.status === 504 || res.status === 502) {
+            throw new Error('Server processing timed out. Please try with smaller or fewer files.');
+          }
+          if (res.status === 404) {
+            throw new Error('Resource not found on server.');
+          }
+          throw new Error(`${defaultErrorMsg} (Server returned HTTP ${res.status})`);
+        }
+        throw new Error(defaultErrorMsg);
+      }
+
+      if (!res.ok) {
+        const detail = (parsed && (parsed.detail || parsed.message || parsed.error)) || `${defaultErrorMsg} (HTTP ${res.status})`;
+        throw new Error(detail);
+      }
+
+      return parsed;
+    },
+
     async speakTextAloud(rawText) {
       const clean = (rawText || '').replace(/[$*`#_~]/g, '').trim();
       if (!clean) return;
@@ -354,8 +389,8 @@ document.addEventListener('alpine:init', () => {
             body: JSON.stringify({ text: clean, voice_id: this.elevenlabsVoice || 'Rachel' }),
           });
           if (res.ok) {
-            const data = await res.json();
-            if (data.audio_base64) {
+            const data = await this.safeReadJson(res, 'TTS failed');
+            if (data?.audio_base64) {
               const audio = new Audio(`data:audio/mpeg;base64,${data.audio_base64}`);
               await audio.play();
               return;
@@ -375,13 +410,11 @@ document.addEventListener('alpine:init', () => {
     async fetchSubjectsList() {
       try {
         const res = await fetch('/api/subjects');
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data.subjects)) {
-            const merged = Array.from(new Set([...this.customSubjects, ...data.subjects]));
-            this.customSubjects = merged;
-            localStorage.setItem('modernality_subjects', JSON.stringify(merged));
-          }
+        const data = await this.safeReadJson(res, 'Failed to fetch subjects');
+        if (Array.isArray(data?.subjects)) {
+          const merged = Array.from(new Set([...this.customSubjects, ...data.subjects]));
+          this.customSubjects = merged;
+          localStorage.setItem('modernality_subjects', JSON.stringify(merged));
         }
       } catch (_) {}
     },
@@ -389,11 +422,9 @@ document.addEventListener('alpine:init', () => {
     async fetchRecentProblems() {
       try {
         const res = await fetch('/api/interactive/recent');
-        if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data.problems) && data.problems.length > 0) {
-            this.wbRecentProblems = data.problems;
-          }
+        const data = await this.safeReadJson(res, 'Failed to fetch recent problems');
+        if (Array.isArray(data?.problems) && data.problems.length > 0) {
+          this.wbRecentProblems = data.problems;
         }
       } catch (_) {}
     },
@@ -470,10 +501,10 @@ document.addEventListener('alpine:init', () => {
     async checkStatus() {
       try {
         const res = await fetch('/api/status');
-        const data = await res.json();
-        this.apiKeyConfigured = !!data.api_key_configured;
-        this.elevenlabsConfigured = !!data.elevenlabs_configured;
-        if (data.gcp) {
+        const data = await this.safeReadJson(res, 'Status check failed');
+        this.apiKeyConfigured = !!data?.api_key_configured;
+        this.elevenlabsConfigured = !!data?.elevenlabs_configured;
+        if (data?.gcp) {
           this.gcpStatus = data.gcp;
           if (data.gcp.project_id && !this.gcpProjectInput) {
             this.gcpProjectInput = data.gcp.project_id;
@@ -512,8 +543,7 @@ document.addEventListener('alpine:init', () => {
             region: this.gcpRegionInput.trim() || 'us-east4',
           }),
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Failed to configure Google Cloud backend');
+        const data = await this.safeReadJson(res, 'Failed to configure Google Cloud backend');
         this.gcpStatus = data.gcp;
         this.gcpBucketInput = this.gcpStatus.gcs_bucket_name || '';
         await this.fetchKitsList();
@@ -533,8 +563,7 @@ document.addEventListener('alpine:init', () => {
       this.cloudSyncMessage = '';
       try {
         const res = await fetch('/api/cloud/sync', { method: 'POST' });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail || 'Cloud sync failed');
+        const data = await this.safeReadJson(res, 'Cloud sync failed');
         this.gcpStatus = data.gcp;
         await this.fetchKitsList();
         this.cloudSyncMessage = `Synced ${data.synced_kits} Study Kit(s) to Cloud Firestore (${this.gcpStatus.firestore_collection})!`;
@@ -557,13 +586,9 @@ document.addEventListener('alpine:init', () => {
             elevenlabs_voice_id: this.elevenlabsVoice || 'Rachel',
           }),
         });
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.detail || 'Invalid API key configuration');
-        }
-        const data = await res.json();
-        this.apiKeyConfigured = !!data.api_key_configured;
-        this.elevenlabsConfigured = !!data.elevenlabs_configured;
+        const data = await this.safeReadJson(res, 'Invalid API key configuration');
+        this.apiKeyConfigured = !!data?.api_key_configured;
+        this.elevenlabsConfigured = !!data?.elevenlabs_configured;
         this.showApiKeyModal = false;
         this.apiKeyInput = '';
         this.elevenlabsKeyInput = '';
@@ -576,7 +601,10 @@ document.addEventListener('alpine:init', () => {
     async fetchKitsList() {
       try {
         const res = await fetch('/api/kits');
-        this.kitsList = await res.json();
+        const data = await this.safeReadJson(res, 'Failed to list kits');
+        if (Array.isArray(data)) {
+          this.kitsList = data;
+        }
       } catch (err) {
         console.error('Failed to list kits:', err);
       }
@@ -586,8 +614,7 @@ document.addEventListener('alpine:init', () => {
       try {
         this.stopSlidePlayback();
         const res = await fetch(`/api/kits/${kitId}`);
-        if (!res.ok) throw new Error('Could not load study kit');
-        const data = await res.json();
+        const data = await this.safeReadJson(res, 'Could not load study kit');
         this.currentKitId = kitId;
         this.currentKitRecord = data;
         this.currentSlideIndex = 0;
@@ -674,11 +701,7 @@ document.addEventListener('alpine:init', () => {
             sources: this.editableSources,
           }),
         });
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.detail || 'Could not save study set details');
-        }
-        const updatedRec = await res.json();
+        const updatedRec = await this.safeReadJson(res, 'Could not save study set details');
         this.currentKitRecord = updatedRec;
         await this.fetchSubjectsList();
         await this.fetchKitsList();
@@ -761,7 +784,7 @@ document.addEventListener('alpine:init', () => {
           body: JSON.stringify({ flashcards: cards }),
         });
         if (res.ok) {
-          const updated = await res.json();
+          const updated = await this.safeReadJson(res, 'Could not parse updated cards');
           this.currentKitRecord = updated;
           await this.fetchKitsList();
           this.$nextTick(() => this.typesetMath());
@@ -871,11 +894,7 @@ document.addEventListener('alpine:init', () => {
           method: 'POST',
           body: formData,
         });
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.detail || 'Study set synthesis failed');
-        }
-        const newKitRecord = await res.json();
+        const newKitRecord = await this.safeReadJson(res, 'Study set synthesis failed');
         await this.fetchSubjectsList();
         await this.fetchKitsList();
         await this.loadStudyKit(newKitRecord.id);
@@ -1007,11 +1026,7 @@ document.addEventListener('alpine:init', () => {
             voice_name: this.selectedVoice,
           }),
         });
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.detail || 'TTS failed');
-        }
-        const data = await res.json();
+        const data = await this.safeReadJson(res, 'TTS failed');
         this.slideAudioUrls[String(slide.slide_number)] = data.audio_url;
       } catch (err) {
         this.errorBanner = err.message;
@@ -1041,11 +1056,7 @@ document.addEventListener('alpine:init', () => {
             resolution: '720p',
           }),
         });
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.detail || 'Omni Flash video generation failed');
-        }
-        const data = await res.json();
+        const data = await this.safeReadJson(res, 'Omni Flash video generation failed');
         this.slideVideoUrls[String(slide.slide_number)] = data.video_url;
       } catch (err) {
         this.errorBanner = err.message;
@@ -1130,11 +1141,7 @@ document.addEventListener('alpine:init', () => {
             student_answer: answerText,
           }),
         });
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.detail || 'Grading failed');
-        }
-        const gradeData = await res.json();
+        const gradeData = await this.safeReadJson(res, 'Grading failed');
         this.gradingResultsByProblem[prob.id] = gradeData;
         this.$nextTick(() => this.typesetMath());
       } catch (err) {
@@ -1416,11 +1423,7 @@ document.addEventListener('alpine:init', () => {
             image_mime: attachedImg?.mime || 'image/jpeg',
           }),
         });
-        if (!res.ok) {
-          const err = await res.json();
-          throw new Error(err.detail || 'Chat request failed');
-        }
-        const data = await res.json();
+        const data = await this.safeReadJson(res, 'Chat request failed');
         this.lastInteractionId = data.interaction_id;
         this.chatMessages.push({
           role: 'assistant',
@@ -1849,8 +1852,7 @@ document.addEventListener('alpine:init', () => {
               kit_id: this.currentKitId || null,
             }),
           });
-          if (!res.ok) throw new Error((await res.json()).detail || 'Failed to solve problem');
-          this.wbSolutionData = await res.json();
+          this.wbSolutionData = await this.safeReadJson(res, 'Failed to solve problem');
           this.$nextTick(() => this.typesetMath());
         } else if (mode === 'guided') {
           this.wbGuidedStep = 1;
@@ -1867,8 +1869,7 @@ document.addEventListener('alpine:init', () => {
               image_mime: this.wbProblemMime,
             }),
           });
-          if (!res.ok) throw new Error((await res.json()).detail || 'Failed to start guided session');
-          const data = await res.json();
+          const data = await this.safeReadJson(res, 'Failed to start guided session');
           this.wbGuidedHistory = [{ role: 'ai', content: data.content, type: 'question' }];
           this.wbGuidedHint = data.next_guiding_hint || '';
           this.$nextTick(() => this.typesetMath());
@@ -1883,8 +1884,7 @@ document.addEventListener('alpine:init', () => {
               kit_id: this.currentKitId || null,
             }),
           });
-          if (!res.ok) throw new Error((await res.json()).detail || 'Failed to prepare whiteboard demo');
-          this.wbDemoData = await res.json();
+          this.wbDemoData = await this.safeReadJson(res, 'Failed to prepare whiteboard demo');
           this.wbDemoStepIndex = 0;
           this.$nextTick(() => {
             this.initWhiteboardCanvas();
@@ -1941,8 +1941,7 @@ document.addEventListener('alpine:init', () => {
             image_mime: this.wbProblemMime,
           }),
         });
-        if (!res.ok) throw new Error('Guided learning step failed');
-        const data = await res.json();
+        const data = await this.safeReadJson(res, 'Guided learning step failed');
         this.wbGuidedHistory.push({
           role: 'ai',
           content: data.content,
@@ -2296,8 +2295,8 @@ document.addEventListener('alpine:init', () => {
             }),
           });
           if (res.ok && this.wbDemoPlaying) {
-            const data = await res.json();
-            if (data.audio_base64) {
+            const data = await this.safeReadJson(res, 'Whiteboard TTS failed');
+            if (data?.audio_base64) {
               if (this.wbDemoAudioEl) {
                 this.wbDemoAudioEl.pause();
                 this.wbDemoAudioEl = null;

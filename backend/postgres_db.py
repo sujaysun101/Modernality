@@ -23,8 +23,6 @@ from psycopg.types.json import Jsonb
 
 logger = logging.getLogger("modernality.postgres")
 
-DEFAULT_DATABASE_URL = "postgresql://modernality:modernality@localhost:5432/modernality"
-
 DDL_SCHEMA = """
 CREATE TABLE IF NOT EXISTS subjects (
     id SERIAL PRIMARY KEY,
@@ -70,7 +68,7 @@ class PostgresStudyDatabase:
         self.local_kits_dir.mkdir(parents=True, exist_ok=True)
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
-        self.database_url: str = os.environ.get("DATABASE_URL", DEFAULT_DATABASE_URL).strip()
+        self.database_url: str = os.environ.get("DATABASE_URL", "").strip()
         self.pg_active: bool = False
         self.last_pg_error: Optional[str] = None
 
@@ -108,6 +106,10 @@ class PostgresStudyDatabase:
             pass
 
     def _initialize_postgres(self) -> None:
+        if not self.database_url:
+            self.pg_active = False
+            self.last_pg_error = "DATABASE_URL not set in .env"
+            return
         try:
             self._ensure_database_exists()
             with self._get_connection() as conn:

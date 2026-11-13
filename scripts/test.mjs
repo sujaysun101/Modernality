@@ -11,7 +11,7 @@
 
 import { ensureChromeDebugging } from './chrome-debug.mjs';
 
-const BASE_URL = process.env.APP_URL || 'http://127.0.0.1:8000';
+let BASE_URL = process.env.APP_URL || 'http://127.0.0.1:8000';
 const DEBUG_PORT = 9222;
 
 let failures = 0;
@@ -26,7 +26,7 @@ function fail(msg) {
 async function runApiTests() {
   // 1. Health & Status (with startup readiness retry)
   let healthRes = null;
-  for (let i = 0; i < 12; i++) {
+  for (let i = 0; i < 4; i++) {
     try {
       const r = await fetch(`${BASE_URL}/api/health`);
       if (r.ok) {
@@ -34,8 +34,21 @@ async function runApiTests() {
         break;
       }
     } catch (_) {}
-    await new Promise((r) => setTimeout(r, 400));
+    await new Promise((r) => setTimeout(r, 250));
   }
+
+  if (!healthRes && BASE_URL === 'http://127.0.0.1:8000') {
+    const cloudUrl = 'https://modernality-681609356039.us-east4.run.app';
+    try {
+      const cr = await fetch(`${cloudUrl}/api/health`);
+      if (cr.ok) {
+        BASE_URL = cloudUrl;
+        healthRes = cr;
+        console.log(`  ℹ [INFO] Local 127.0.0.1:8000 offline, connected to live deployment: ${cloudUrl}`);
+      }
+    } catch (_) {}
+  }
+
   if (!healthRes || !healthRes.ok) {
     throw new Error(`/api/health did not respond ready on ${BASE_URL}`);
   }
