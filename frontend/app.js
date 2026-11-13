@@ -870,9 +870,54 @@ document.addEventListener('alpine:init', () => {
         : 'Extracting sources & building flashcards, tests, and study guide...';
 
       const formData = new FormData();
-      for (const file of this.selectedFiles) {
-        formData.append('files', file);
+      const stagedFiles = [];
+      const CHUNK_SIZE = 10 * 1024 * 1024; // 10 MB per chunk (well below Cloud Run 32 MB HTTP body limit)
+
+      try {
+        for (const file of this.selectedFiles) {
+          if (file.size > 20 * 1024 * 1024) {
+            // Upload large file in 10 MB chunks
+            const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+            const uploadId = `up_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+
+            for (let c = 0; c < totalChunks; c++) {
+              const start = c * CHUNK_SIZE;
+              const end = Math.min(start + CHUNK_SIZE, file.size);
+              const chunkBlob = file.slice(start, end);
+              const pct = Math.round(((c + 1) / totalChunks) * 100);
+              this.synthesisStepText = `Uploading ${file.name} (Part ${c + 1}/${totalChunks} • ${pct}%)...`;
+
+              const chunkForm = new FormData();
+              chunkForm.append('upload_id', uploadId);
+              chunkForm.append('chunk_index', String(c));
+              chunkForm.append('total_chunks', String(totalChunks));
+              chunkForm.append('filename', file.name);
+              chunkForm.append('chunk', chunkBlob, file.name);
+
+              const cRes = await fetch('/api/upload/chunk', {
+                method: 'POST',
+                body: chunkForm,
+              });
+              const cData = await this.safeReadJson(cRes, `Upload failed for part ${c + 1} of ${file.name}`);
+              if (cData.status === 'complete') {
+                stagedFiles.push({
+                  saved_name: cData.saved_name,
+                  filename: file.name,
+                  size: cData.size,
+                });
+              }
+            }
+          } else {
+            formData.append('files', file);
+          }
+        }
+      } catch (uploadErr) {
+        this.errorBanner = uploadErr.message;
+        this.isSynthesizing = false;
+        return;
       }
+
+      formData.append('staged_files_json', JSON.stringify(stagedFiles));
       formData.append('urls_json', JSON.stringify(this.addedUrls));
       formData.append('raw_notes', this.rawNotes);
       formData.append('custom_focus', this.customFocus);

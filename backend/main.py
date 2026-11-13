@@ -9,6 +9,8 @@ import datetime
 import json
 import os
 import re
+import shutil
+import tempfile
 import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -427,9 +429,62 @@ async def update_kit_subject(kit_id: str, req: UpdateKitSubjectRequest) -> Dict[
     return STUDY_KITS[safe_id]
 
 
+CHUNK_DIR = Path(tempfile.gettempdir()) / "modernality_chunks"
+CHUNK_DIR.mkdir(parents=True, exist_ok=True)
+
+
+@app.post("/api/upload/chunk")
+async def upload_file_chunk(
+    upload_id: str = Form(...),
+    chunk_index: int = Form(...),
+    total_chunks: int = Form(...),
+    filename: str = Form(...),
+    chunk: UploadFile = File(...),
+) -> Dict[str, Any]:
+    safe_upload_id = re.sub(r"[^a-zA-Z0-9_-]", "", upload_id)
+    if not safe_upload_id:
+        raise HTTPException(status_code=400, detail="Invalid upload session ID.")
+
+    session_dir = CHUNK_DIR / safe_upload_id
+    session_dir.mkdir(parents=True, exist_ok=True)
+
+    chunk_file = session_dir / f"chunk_{chunk_index:05d}.part"
+    chunk_bytes = await chunk.read()
+    chunk_file.write_bytes(chunk_bytes)
+
+    parts = sorted(session_dir.glob("chunk_*.part"))
+    if len(parts) >= total_chunks:
+        clean_name = Path(filename).name
+        safe_up_name = f"{uuid.uuid4().hex[:6]}_{clean_name}"
+        final_path = UPLOAD_DIR / safe_up_name
+        UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        with final_path.open("wb") as out_f:
+            for part in parts:
+                out_f.write(part.read_bytes())
+
+        shutil.rmtree(session_dir, ignore_errors=True)
+
+        return {
+            "status": "complete",
+            "staged_id": safe_upload_id,
+            "filename": clean_name,
+            "saved_name": safe_up_name,
+            "size": final_path.stat().st_size,
+        }
+
+    return {
+        "status": "chunk_received",
+        "staged_id": safe_upload_id,
+        "chunk_index": chunk_index,
+        "total_chunks": total_chunks,
+        "received_chunks": len(parts),
+    }
+
+
 @app.post("/api/ingest-and-synthesize")
 async def ingest_and_synthesize(
     files: List[UploadFile] = File(default=[]),
+    staged_files_json: str = Form(default="[]"),
     urls_json: str = Form(default="[]"),
     raw_notes: str = Form(default=""),
     custom_focus: str = Form(default=""),
@@ -474,6 +529,33 @@ async def ingest_and_synthesize(
 
         extracted = await asyncio.to_thread(
             extract_single_file_bytes, raw_bytes, up_file.filename, UPLOAD_DIR
+        )
+        ingested_items.extend(extracted)
+
+    # 1b. Process staged chunked uploads (bypasses Cloud Run 32 MB HTTP reverse proxy limit)
+    try:
+        staged_list = json.loads(staged_files_json) if staged_files_json else []
+    except Exception:
+        staged_list = []
+
+    for staged in staged_list:
+        saved_name = staged.get("saved_name")
+        orig_name = staged.get("filename", "uploaded_file.pdf")
+        if not saved_name:
+            continue
+        staged_path = UPLOAD_DIR / saved_name
+        if not staged_path.exists():
+            continue
+        raw_bytes = staged_path.read_bytes()
+        if gcp_backend.gcs_active:
+            await asyncio.to_thread(
+                gcp_backend.upload_media_file,
+                staged_path,
+                "uploads",
+                "application/octet-stream",
+            )
+        extracted = await asyncio.to_thread(
+            extract_single_file_bytes, raw_bytes, orig_name, UPLOAD_DIR
         )
         ingested_items.extend(extracted)
 

@@ -75,6 +75,7 @@ const requiredBackendRoutes = [
   '/api/kits/{kit_id}/metadata',
   '/api/kits/{kit_id}/progress',
   '/api/subjects',
+  '/api/upload/chunk',
   '/api/ingest-and-synthesize',
   '/api/tts/elevenlabs',
   '/api/interactive/solve',
